@@ -8,13 +8,16 @@
 
 #define MAX_BLOCKING 5
 
-void scheduler(ctx_t* ctx);
-int schedule(pid_t pid); //returns -1 if unsuccessful
-int deschedule(pid_t pid); //returns -1 if unsuccessful
-void initialise_scheduler(uint32_t init_stack);
-void normalise_vruntimes();
+void  scheduler(ctx_t* ctx);
+int   schedule(pid_t pid); //returns -1 if unsuccessful
+int   deschedule(pid_t pid); //returns -1 if unsuccessful
+void  initialise_scheduler(uint32_t init_stack);
+void  normalise_vruntimes();
 pid_t init_pcb(uint32_t pc); //return -2 if out of space!
 pid_t init_pcb_by_pointer(pcb_t* pcb);
-int destroy_pid(pid_t pid);
+int   destroy_pid(pid_t pid);
+void  unblock_by_pid(pid_t pid);
+void  unblock_random();
+int   block_pid(pid_t pid, proc_state_t reason);
 
 #endif

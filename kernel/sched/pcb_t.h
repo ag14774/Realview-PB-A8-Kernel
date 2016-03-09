@@ -19,7 +19,12 @@
  * - a type that captures a process PCB.
  **/
 
-typedef enum {CREATED, READY, RUNNING, BLOCKED} proc_state_t;
+//CREATED: When a new process is spawned
+//READY  : Process is in priority queue
+//RUNNING: Currently running process
+//BLOCKED: Waiting for use input(usually unblocked by read)
+//WAITING: Waiting for child to finish
+typedef enum {NONE, CREATED, READY, RUNNING, BLOCKED, WAITING} proc_state_t;
 
 typedef struct ctx_t { //DO NOT MODIFY THIS
   uint32_t cpsr, pc, gpr[ 13 ], sp, lr;
@@ -46,10 +51,7 @@ typedef struct pcb_t {
   uint8_t priority; //1(highest)-20
   uint32_t vruntime; //vruntime = vruntime + priority
   uint32_t queue_index;
-  //TO DO:
-  //-Add table of children's IDs(?)
-  //-Add enum for state of process
-  //-Add enum for either on background or foreground
+  //maybe add block_index too?
 } pcb_t;
 
 void update_runtime(pcb_t *pcb);

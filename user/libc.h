@@ -12,12 +12,26 @@ void yield();
 // write n bytes from x to the file descriptor fd
 int write( int fd, void* x, size_t n );
 
+//read max n bytes from fd to x. returns number of actual bytes read.
+int read( int fd, void* x, size_t n );
+
 int fork();
 
 void exit();
 
+//Blocks until a child or syscall forces the program to continue
+//pid is the next process that is going to be in the foreground
+//(only if the calling process is in the foreground)
+//if pid is the same as the calling process, then the process
+//blocks until a syscall unblocks it
+//return child pid or 0 if interrupted
+//in some sense, it is a mix of waitpid() and ioctl()
+int waitpid(int pid);
+
 char* itoa(int i, char b[]);
 
 int printF(const char* f,...);
+
+int read_line(char b[], size_t array_size);
 
 #endif

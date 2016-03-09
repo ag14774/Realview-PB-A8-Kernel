@@ -70,6 +70,8 @@ int delete_ht(hashtable_t* ht, pid_t pid) { //returns -1 if unsuccessful
     return 0;
 }
 pcb_t* find_pid_ht(hashtable_t* ht, pid_t pid) { //return null if not found
+    if(pid<1)
+        return NULL;
     uint32_t index = hash_fun(pid);
     uint32_t j = 0;
     for(j=0;j<HT_BUCKET;j++){

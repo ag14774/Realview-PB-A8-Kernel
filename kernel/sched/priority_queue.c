@@ -78,6 +78,6 @@ pcb_t* extract_min(queue_t* q){
     else
         q->min_vruntime = 0;
     pcb->queue_index = -1;
-    pcb->proc_state = BLOCKED; //this will change to RUNNING if proc moves to *current
+    pcb->proc_state = WAITING; //this will change to RUNNING if proc moves to *current
     return pcb;
 }

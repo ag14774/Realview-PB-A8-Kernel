@@ -13,6 +13,42 @@ extern pcb_t *current;
 extern hashtable_t* ht_ptr;
 extern input_buff* ib_ptr;
 
+//*******FIX RUNTIMES. UPDATE RUNTIMES IS NOT CALLED IN KERNEL.C*******
+//*******MAKE SCHEDULER CHECK IF PROCESS IS BLOCKED BEFORE INSERT******
+
+void __exit(ctx_t* ctx, int destroy, pid_t pid){
+  int isCurrent = 0;
+  if(pid == current->pid)
+    isCurrent = 1;
+  pcb_t* temp = find_pid_ht(ht_ptr, ib_ptr->pid);
+  if(temp->pid == 1 || temp->ph.parent < 1) //Do not exit the shell
+    return;
+  deschedule(temp->pid);
+  pid_t parent_id = temp->ph.parent;
+  pcb_t* parent = find_pid_ht(ht_ptr,parent_id);
+  if(parent){
+    if(parent->proc_state == WAITING){
+      parent->ctx.gpr[0] = temp->pid;
+      unblock_by_pid(parent_id);
+    }
+    if(ib_ptr->pid == temp->pid){ //consider making this a separate system call(ioctl)
+      flush_buff(ib_ptr);
+      ib_ptr->pid = parent_id;
+    }
+  }
+  if(destroy){
+    destroy_pid(temp->pid);
+  }
+  else {
+    block_pid(temp->pid, WAITING);
+    if(isCurrent)
+      update_ctx(temp, ctx);
+  }
+  if(isCurrent)
+    current = NULL;
+  scheduler( ctx );
+}
+
 void process_char_stdout(uint8_t c){
   if(c == BACKSPACE || c == DELETE){
     PL011_putc(UART0, c);
@@ -94,20 +130,19 @@ void kernel_handler_irq( ctx_t* ctx ) {
     }
     case GIC_SOURCE_UART0 : {
       uint8_t c = PL011_getc( UART0 );
-      //process_char(&ib,c);
-      if(c == CTRLC){ //THIS SHOULD EXIT THE FOREGROUND PROCESS
-        deschedule(current->pid);
-        destroy_pid(current->pid);
-        current = NULL;
-        scheduler( ctx );
+      int ready = process_char(ib_ptr,c);
+      if(c == CTRLC){ //exit the foreground process. have an internal _exit() call
+        __exit(ctx, 1, ib_ptr->pid);
       }
       else if(c == CTRLZ){
-      
+        __exit(ctx, 0, ib_ptr->pid);
       }
       else{
         process_char_stdout(c);
       }
-
+      if(ready){
+        unblock_by_pid(ib_ptr->pid);
+      }
       UART0->ICR = 0x10;
       break;
     }
@@ -161,34 +196,55 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       break;
     }
     case 0x03 : { //exit()
-      deschedule(current->pid);
-      destroy_pid(current->pid);
-      current = NULL;
-      scheduler( ctx );
+      __exit(ctx, 1, current->pid);
       break;
     }
-    case 0x04 : { //read(fd, x, n)
-      //if current in background
-      //  block and remove from queue
-      //if current in foreground
-      //if(!ib.ready){
-        //go back 4 bytes in lr
-        //deschedule
-      //}
-      //else{
-        int   fd = ( int   )( ctx->gpr[ 0 ] );
-        char*  x = ( char* )( ctx->gpr[ 1 ] );
-        int    n = ( int   )( ctx->gpr[ 2 ] );
-        int i = 0;
-        //for(i=0;i<n;i++){
-        //  x[i] = ib.buff[i];
-        //  if(i == ib.n-1){
-        //    i = ib.n;
-        //    break;
-        //  }
-        //}
-        ctx->gpr[0] = i;
-      //}
+    case 0x04 : { //read(fd, x, n) //SHOULD ALSO RETURN READY WHEN N CHARACTERS ARE READ
+      if(ib_ptr->pid != current->pid || !ib_ptr->ready){
+        if(ib_ptr->pid == 0){
+          flush_buff(ib_ptr);
+          ib_ptr->pid = current->pid;
+        }
+        ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
+        block_pid(current->pid, BLOCKED);
+        update_ctx(current, ctx);
+        current = NULL;
+        scheduler(ctx);
+        break;
+      }
+      int   fd = ( int   )( ctx->gpr[ 0 ] );
+      char*  x = ( char* )( ctx->gpr[ 1 ] );
+      int    n = ( int   )( ctx->gpr[ 2 ] );
+      int i = 0;
+      for(i=0;i<n;i++){
+        x[i] = ib_ptr->buff[i];
+        if(i == ib_ptr->n-1){
+          i = ib_ptr->n;
+          break;
+        }
+      }
+      flush_buff(ib_ptr);
+      ib_ptr->pid = current->pid;
+      ctx->gpr[0] = i;
+      break;
+    }
+    case 0x05 : { //waitpid(int pid) if pid is not in the queue, add it.
+      int pid = (int)(ctx->gpr[0]);
+      if(ib_ptr->pid == current->pid && current->pid != pid){ //that might be wrong
+        flush_buff(ib_ptr);
+        ib_ptr->pid = pid;
+      }
+      proc_state_t reason;
+      if(current->pid == pid) //waiting for self. that means block
+        reason = BLOCKED;
+      else { //make this work only if pid is a child of current
+        reason = WAITING;
+        unblock_by_pid(pid);//if it is blocked
+      }
+      block_pid(current->pid, reason);
+      update_ctx(current, ctx);
+      current = NULL;
+      scheduler( ctx );
       break;
     }
     default   : { // unknown
