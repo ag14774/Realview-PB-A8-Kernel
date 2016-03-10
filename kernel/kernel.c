@@ -16,41 +16,42 @@ extern input_buff* ib_ptr;
 //*******FIX RUNTIMES. UPDATE RUNTIMES IS NOT CALLED IN KERNEL.C*******
 //*******MAKE SCHEDULER CHECK IF PROCESS IS BLOCKED BEFORE INSERT******
 
+//Transfers buffer control from process 'from' to process 'to'
+//only if process 'from' has the control of the buffer
+void __ioctl(pid_t from, pid_t to){
+  if(from == to)
+      return;
+  if(ib_ptr->pid == from || ib_ptr->pid == 0){
+    flush_buff(ib_ptr);
+    ib_ptr->pid = to;
+  }
+}
+
 void __exit(ctx_t* ctx, int destroy, pid_t pid){
-  int isCurrent = 0;
-  if(pid == current->pid)
-    isCurrent = 1;
-  pcb_t* temp = find_pid_ht(ht_ptr, ib_ptr->pid);
-  if(temp->pid == 1 || temp->ph.parent < 1) //Do not exit the shell
+  pcb_t* temp = find_pid_ht(ht_ptr, pid);
+  if(pid == 1 || temp->ph.parent < 1) //Do not exit the shell
     return;
-  deschedule(temp->pid);
+  deschedule(pid);
   pid_t parent_id = temp->ph.parent;
   pcb_t* parent = find_pid_ht(ht_ptr,parent_id);
   if(parent){
-    if(parent->proc_state == WAITING){
-      parent->ctx.gpr[0] = temp->pid;
+    if(parent->proc_state == WAITING){ //if parent is waiting, let it know that we are exiting
+      parent->ctx.gpr[0] = pid;
       unblock_by_pid(parent_id);
     }
-    if(ib_ptr->pid == temp->pid){ //consider making this a separate system call(ioctl)
-      flush_buff(ib_ptr);
-      ib_ptr->pid = parent_id;
-    }
+    __ioctl(pid, parent_id);
   }
   if(destroy){
-    destroy_pid(temp->pid);
+    destroy_pid(pid);
   }
   else {
-    block_pid(temp->pid, WAITING);
-    if(isCurrent)
-      update_ctx(temp, ctx);
+    temp->proc_state = WAITING;
   }
-  if(isCurrent)
-    current = NULL;
   scheduler( ctx );
 }
 
 void process_char_stdout(uint8_t c){
-  if(c == BACKSPACE || c == DELETE){
+  if( (c == BACKSPACE || c == DELETE) && !ib_ptr->ready ){
     PL011_putc(UART0, c);
     PL011_putc(UART0, ' ');
     PL011_putc(UART0, c);
@@ -58,7 +59,7 @@ void process_char_stdout(uint8_t c){
   else if(c == NEWLINE || c == RETURN){
     PL011_putc(UART0, '\n');
   }
-  else if(c>=0x20 && c<=0x7E){
+  else if(c>=0x20 && c<=0x7E && !ib_ptr->ready){
     PL011_putc(UART0, c);
   }
 }
@@ -142,6 +143,7 @@ void kernel_handler_irq( ctx_t* ctx ) {
       }
       if(ready){
         unblock_by_pid(ib_ptr->pid);
+        scheduler( ctx );//not sure if this should be here
       }
       UART0->ICR = 0x10;
       break;
@@ -200,40 +202,37 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       break;
     }
     case 0x04 : { //read(fd, x, n) //SHOULD ALSO RETURN READY WHEN N CHARACTERS ARE READ
-      if(ib_ptr->pid != current->pid || !ib_ptr->ready){
-        if(ib_ptr->pid == 0){
-          flush_buff(ib_ptr);
-          ib_ptr->pid = current->pid;
-        }
-        ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
-        block_pid(current->pid, BLOCKED);
-        update_ctx(current, ctx);
-        current = NULL;
-        scheduler(ctx);
-        break;
-      }
+      //when you press enter, the buffer should become ready
+      //it should stay ready until i == n
+      //do not accept characters while it's ready
+      //once flushed accept more
       int   fd = ( int   )( ctx->gpr[ 0 ] );
       char*  x = ( char* )( ctx->gpr[ 1 ] );
       int    n = ( int   )( ctx->gpr[ 2 ] );
+      if(ib_ptr->pid == current->pid && n <= ib_ptr->n){
+        
+      }
+      if(ib_ptr->pid != current->pid || !ib_ptr->ready){
+        __ioctl(0, current->pid);
+        ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
+        current->proc_state = BLOCKED;
+        scheduler(ctx);
+        break;
+      }
       int i = 0;
       for(i=0;i<n;i++){
-        x[i] = ib_ptr->buff[i];
-        if(i == ib_ptr->n-1){
-          i = ib_ptr->n;
+        x[i] = consume_char(ib_ptr);
+        if(!ib_ptr->ready){
+          i = i + 1;
           break;
         }
       }
-      flush_buff(ib_ptr);
-      ib_ptr->pid = current->pid;
       ctx->gpr[0] = i;
       break;
     }
     case 0x05 : { //waitpid(int pid) if pid is not in the queue, add it.
       int pid = (int)(ctx->gpr[0]);
-      if(ib_ptr->pid == current->pid && current->pid != pid){ //that might be wrong
-        flush_buff(ib_ptr);
-        ib_ptr->pid = pid;
-      }
+      __ioctl(current->pid,pid);
       proc_state_t reason;
       if(current->pid == pid) //waiting for self. that means block
         reason = BLOCKED;
@@ -241,9 +240,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
         reason = WAITING;
         unblock_by_pid(pid);//if it is blocked
       }
-      block_pid(current->pid, reason);
-      update_ctx(current, ctx);
-      current = NULL;
+      current->proc_state = reason;
       scheduler( ctx );
       break;
     }

@@ -43,6 +43,8 @@ int block_pid(pid_t pid, proc_state_t reason){
         for(int i = 0;i<MAX_BLOCKING;i++){
             if(!blocking[i]){
                 blocking[i] = p;
+                if(pid == current->pid)
+                    current = NULL;
                 return 0;
             }
         }
@@ -54,7 +56,10 @@ void scheduler(ctx_t* ctx){ //signal normalisation if normalisation_threshold ex
     if(current){
         update_ctx(current, ctx);
         update_runtime(current);
-        insert(&q, current);
+        if(current->proc_state == BLOCKED || current->proc_state == WAITING)
+            block_pid(current->pid, current->proc_state);
+        else
+            insert(&q, current);
         normalise_vruntimes();
     }
     current = NULL;
@@ -67,6 +72,10 @@ void scheduler(ctx_t* ctx){ //signal normalisation if normalisation_threshold ex
             else {
                 unblock_random();
             }
+        }
+        else if(current->proc_state == BLOCKED || current->proc_state == WAITING){
+            block_pid(current->pid, current->proc_state);
+            current = NULL;
         }
     }
     current->proc_state = RUNNING;
@@ -142,6 +151,10 @@ int destroy_pid(pid_t pid){
     pcb_t* pcb = find_pid_ht(&ht, pid);
     if(!pcb)
         return -1;
+    if(pcb->queue_index != -1) //if scheduled, deschedule it.
+        deschedule(pid);
+    if(current->pid == pid)
+        current = NULL;
     declare_free(&us, pcb->stack.tos);
     int error = delete_ht(&ht, pid);
     return error;

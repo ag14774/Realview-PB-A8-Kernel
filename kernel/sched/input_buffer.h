@@ -15,6 +15,7 @@
 
 typedef struct {
     int n;
+    int i; //next char to read
     int ready;
     pid_t pid;
     char buff[BUFFSIZE];
@@ -23,5 +24,6 @@ typedef struct {
 void erase_char(input_buff* ib);
 int process_char(input_buff* ib, uint8_t ch);
 void flush_buff(input_buff* ib);
+char consume_char(input_buff* ib);
 
 #endif

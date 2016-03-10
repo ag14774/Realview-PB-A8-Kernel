@@ -13,6 +13,8 @@ void add_char(input_buff* ib, uint8_t ch){
 }
 
 int process_char(input_buff* ib, uint8_t ch){
+    if(ib->ready)
+        return ib->ready;
     if (ch == BACKSPACE || ch == DELETE){
         erase_char(ib);
     }
@@ -34,7 +36,21 @@ int process_char(input_buff* ib, uint8_t ch){
 void flush_buff(input_buff* ib){
     ib->ready = 0;
     ib->n = 0;
+    ib->i = 0;
     ib->buff[0] = '\0';
     ib->pid = 0;
 }
 
+char consume_char(input_buff* ib){
+    if(ib->ready){
+       char c = ib->buff[ib->i];
+       ib->i = ib->i + 1;
+       if(ib->i == ib->n){
+           pid_t pid = ib->pid;
+           flush_buff(ib);
+           ib->pid = pid;
+       }
+       return c;
+    }
+    return '\0';
+}
