@@ -72,6 +72,7 @@ int read_line(char b[], size_t array_size){
   else if(b[chars-1] != '\0'){
     b[chars++] = '\0';
   }
+  
   return chars;
 }
 
@@ -81,7 +82,7 @@ int read_line(char b[], size_t array_size){
 int printF(const char* f, ...){
     va_list args;      //Define a list of variables
     int done, num;     //'num' is used to temporarily store integer arguments
-    char buffer[50];   //Final message stored here
+    char buffer[500];  //Final message stored here
     char intbuff[15];  //String version of integer argument
     char *s;           //Used as a pointer to intbuff
     size_t len;

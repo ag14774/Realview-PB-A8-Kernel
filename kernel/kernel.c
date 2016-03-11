@@ -51,7 +51,7 @@ void __exit(ctx_t* ctx, int destroy, pid_t pid){
 }
 
 void process_char_stdout(uint8_t c){
-  if( (c == BACKSPACE || c == DELETE) && !ib_ptr->ready ){
+  if( (c == BACKSPACE || c == DELETE) && !ib_ptr->ready && ib_ptr->n>0 ){
     PL011_putc(UART0, c);
     PL011_putc(UART0, ' ');
     PL011_putc(UART0, c);
@@ -99,12 +99,15 @@ void kernel_handler_rst( ctx_t* ctx              ) {
 
   initialise_scheduler((uint32_t)&tos_irq);
   pid_t temp;
-  temp = init_pcb((uint32_t)entry_P0);
+  temp = init_pcb((uint32_t)entry_shell);
   schedule(temp);
-  temp = init_pcb((uint32_t)entry_P1);
-  schedule(temp);
-  temp = init_pcb((uint32_t)entry_P2);
-  schedule(temp);
+
+  //temp = init_pcb((uint32_t)entry_P0);
+  //schedule(temp);
+  //temp = init_pcb((uint32_t)entry_P1);
+  //schedule(temp);
+  //temp = init_pcb((uint32_t)entry_P2);
+  //schedule(temp);
 
   /* Once the PCBs are initialised, we (arbitrarily) select one to be
    * restored (i.e., executed) when the function then returns.
@@ -131,7 +134,6 @@ void kernel_handler_irq( ctx_t* ctx ) {
     }
     case GIC_SOURCE_UART0 : {
       uint8_t c = PL011_getc( UART0 );
-      int ready = process_char(ib_ptr,c);
       if(c == CTRLC){ //exit the foreground process. have an internal _exit() call
         __exit(ctx, 1, ib_ptr->pid);
       }
@@ -141,6 +143,7 @@ void kernel_handler_irq( ctx_t* ctx ) {
       else{
         process_char_stdout(c);
       }
+      int ready = process_char(ib_ptr,c);
       if(ready){
         unblock_by_pid(ib_ptr->pid);
         scheduler( ctx );//not sure if this should be here
@@ -177,9 +180,11 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       char*  x = ( char* )( ctx->gpr[ 1 ] );  
       int    n = ( int   )( ctx->gpr[ 2 ] );
       pid_t pid = current->pid;
-      PL011_puth(UART0, pid);
-      PL011_putc(UART0, ':');
-      PL011_putc(UART0, ' ');
+      if(pid>1){
+        PL011_puth(UART0, pid);
+        PL011_putc(UART0, ':');
+        PL011_putc(UART0, ' ');
+      }
 
       for( int i = 0; i < n; i++ ) {
         PL011_putc( UART0, *x++ );
