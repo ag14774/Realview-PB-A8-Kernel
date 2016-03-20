@@ -6,6 +6,9 @@
 #include <string.h>
 #include <stdarg.h>
 
+#define SIGCONT 0xA0
+#define SIGTERM 0xA1
+
 // cooperatively yield control of processor, i.e., invoke the scheduler
 void yield();
 
@@ -18,6 +21,8 @@ int read( int fd, void* x, size_t n );
 int fork();
 
 void exit();
+
+int exec(const char *path, char *const argv[]);
 
 //Blocks until a child or syscall forces the program to continue
 //pid is the next process that is going to be in the foreground
@@ -33,5 +38,13 @@ char* itoa(int i, char b[]);
 int printF(const char* f,...);
 
 int read_line(char b[], size_t array_size);
+
+int procs(void* x);
+
+int procstat(int p);
+
+void kill(int pid, int signal);
+
+void nice(int pid, int priority);
 
 #endif

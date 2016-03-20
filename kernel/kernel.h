@@ -22,6 +22,15 @@
 #include "P1.h"
 #include "P2.h"
 
+#define SIGCONT 0xA0
+#define SIGTERM 0xA1
+
+
+typedef struct{
+    const char *name;
+    uint32_t entry;
+}entry_info_t;
+
 extern uint32_t tos_irq;
 
 #endif

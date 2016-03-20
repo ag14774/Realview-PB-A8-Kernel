@@ -3,15 +3,29 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include "sbrk.h"
 #include "pcb_t.h"
 
 #define HT_SIZE 50
 #define HT_BUCKET 4
 #define MAX_PROC  50
 
+typedef struct pidkey_t{
+    pid_t pid;
+    struct pidkey_t* next;
+    struct pidkey_t* prev;
+} pidkey_t;
+
+typedef struct {
+    pidkey_t* head;
+    pidkey_t* tail;
+} keyset_t;
+
 typedef struct {
     pcb_t pcbs[HT_SIZE][HT_BUCKET];
     int processes;
+    keyset_t keyset;
 } hashtable_t;
 
 //returns -1 if bucket is full, -2 if above MAX_PROC
@@ -26,7 +40,7 @@ int delete_ht(hashtable_t* ht, pid_t pid);
 //return null if not found
 pcb_t* find_pid_ht(hashtable_t* ht, pid_t pid);
 
-int add_child(hashtable_t* ht, pcb_t* parent, pid_t child);
-int remove_child(hashtable_t* ht, pcb_t* parent, pid_t child);
+pidkey_t* add_key(keyset_t* keyset, pid_t pid);
+void remove_key(keyset_t* keyset, pidkey_t* key);
 
 #endif

@@ -20,12 +20,12 @@ void P0() {
 
   while( 1 ) {
     // test whether each x for 2^8 < x < 2^24 is prime or not
-    int chars = read_line(s,20);
-    printF("Characters read: %d\n", chars);
-    printF("Input text: %s\n",s);
-    //for( uint32_t x = ( 1 << 8 ); x < ( 1 << 24 ); x++ ) {
-    //  int r = is_prime( x ); printF( "is_prime( %d ) = %d\n", x, r );
-    //}
+    //int chars = read_line(s,20);
+    //printF("Characters read: %d\n", chars);
+    //printF("Input text: %s\n",s);
+    for( uint32_t x = ( 1 << 8 ); x < ( 1 << 24 ); x++ ) {
+      int r = is_prime( x ); printF( "is_prime( %d ) = %d\n", x, r );
+    }
   }
 
   return;

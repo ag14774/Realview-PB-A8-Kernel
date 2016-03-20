@@ -13,8 +13,22 @@ extern pcb_t *current;
 extern hashtable_t* ht_ptr;
 extern input_buff* ib_ptr;
 
-//*******FIX RUNTIMES. UPDATE RUNTIMES IS NOT CALLED IN KERNEL.C*******
-//*******MAKE SCHEDULER CHECK IF PROCESS IS BLOCKED BEFORE INSERT******
+//file_table_entry global_table[100];
+
+entry_info_t programs[20];
+
+uint32_t find_entry(char* pn){
+    for(int i=0;i<20;i++){
+        if(strcmp(pn,programs[i].name) == 0){
+            return programs[i].entry;
+        }
+    }
+    return -1;
+}
+
+void __user_exit(int r){
+    asm volatile("svc #3     \n");
+}
 
 //Transfers buffer control from process 'from' to process 'to'
 //only if process 'from' has the control of the buffer
@@ -29,18 +43,20 @@ void __ioctl(pid_t from, pid_t to){
 
 void __exit(ctx_t* ctx, int destroy, pid_t pid){
   pcb_t* temp = find_pid_ht(ht_ptr, pid);
-  if(pid == 1 || temp->ph.parent < 1) //Do not exit the shell
+  if(!temp->ph.parent)
+      temp->ph.parent = find_pid_ht(ht_ptr,1);
+  if(pid == 1 || temp->ph.parent->pid < 1) //Do not exit the shell
     return;
-  deschedule(pid);
-  pid_t parent_id = temp->ph.parent;
-  pcb_t* parent = find_pid_ht(ht_ptr,parent_id);
-  if(parent){
-    if(parent->proc_state == WAITING){ //if parent is waiting, let it know that we are exiting
-      parent->ctx.gpr[0] = pid;
-      unblock_by_pid(parent_id);
-    }
-    __ioctl(pid, parent_id);
+  //deschedule(pid); finally here's the bug!!!
+  pcb_t* parent = temp->ph.parent;
+  if(parent->proc_state == WAITING){ //if parent is waiting, let it know that we are exiting
+    if(destroy)
+        parent->ctx.gpr[0] = ctx->gpr[0];
+    else
+        parent->ctx.gpr[0] = pid;
+    unblock_by_pid(parent->pid);
   }
+  __ioctl(pid, parent->pid);
   if(destroy){
     destroy_pid(pid);
   }
@@ -77,7 +93,7 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   UART0->IMSC           |= 0x00000010; // enable UART    (Rx) interrupt
   UART0->CR              = 0x00000301; // enable UART (Tx+Rx)
 
-  TIMER0->Timer1Load     = 0x00040000; // select period = 2^18 ticks ~= 0.25 sec
+  TIMER0->Timer1Load     = 0x00010000; // select period = 2^18 ticks ~= 0.25 sec
   TIMER0->Timer1Ctrl     = 0x00000002; // select 32-bit   timer
   TIMER0->Timer1Ctrl    |= 0x00000040; // select periodic timer
   TIMER0->Timer1Ctrl    |= 0x00000020; // enable          timer interrupt
@@ -94,8 +110,15 @@ void kernel_handler_rst( ctx_t* ctx              ) {
    *    
    * - the CPSR value of 0x50 means the processor is switched into USR 
    *   mode, with IRQ interrupts enabled, and
-   * - the PC and SP values matche the entry point and top of stack. 
+   * - the PC and SP values match the entry point and top of stack. 
    */
+    
+  programs[0].name  = "P0";
+  programs[0].entry = (uint32_t)entry_P0;
+  programs[1].name  = "P1";
+  programs[1].entry = (uint32_t)entry_P1;
+  programs[2].name  = "P2";
+  programs[2].entry = (uint32_t)entry_P2;
 
   initialise_scheduler((uint32_t)&tos_irq);
   pid_t temp;
@@ -146,7 +169,7 @@ void kernel_handler_irq( ctx_t* ctx ) {
       int ready = process_char(ib_ptr,c);
       if(ready){
         unblock_by_pid(ib_ptr->pid);
-        scheduler( ctx );//not sure if this should be here
+        //scheduler( ctx );//not sure if this should be here
       }
       UART0->ICR = 0x10;
       break;
@@ -199,6 +222,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       ctx->gpr[0] = child;
       pcb_t* childPCB = find_pid_ht(ht_ptr, child);
       childPCB->ctx.gpr[0] = 0;
+      //__ioctl(current->pid,childPCB->pid);
       schedule(child);
       break;
     }
@@ -214,11 +238,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       int   fd = ( int   )( ctx->gpr[ 0 ] );
       char*  x = ( char* )( ctx->gpr[ 1 ] );
       int    n = ( int   )( ctx->gpr[ 2 ] );
-      if(ib_ptr->pid == current->pid && n <= ib_ptr->n){
-        
-      }
       if(ib_ptr->pid != current->pid || !ib_ptr->ready){
-        __ioctl(0, current->pid);
+        __ioctl(0, current->pid); //if nobody has ownership then give ownership
         ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
         current->proc_state = BLOCKED;
         scheduler(ctx);
@@ -237,6 +258,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x05 : { //waitpid(int pid) if pid is not in the queue, add it.
       int pid = (int)(ctx->gpr[0]);
+      if(find_pid_ht(ht_ptr,pid)==NULL)
+          break;
       __ioctl(current->pid,pid);
       proc_state_t reason;
       if(current->pid == pid) //waiting for self. that means block
@@ -247,6 +270,100 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       }
       current->proc_state = reason;
       scheduler( ctx );
+      break;
+    }
+    case 0x06 : { //exec("program name",[*a0,*a1,*a2,...])
+      char*  pn   = (char * ) ctx->gpr[0];
+      char** argv = (char **) ctx->gpr[1];
+      int i = 0;
+
+      uint32_t pc = find_entry(pn);
+      if(pc==-1){
+          ctx->gpr[0] = -1;
+          break;
+      }
+
+      char* arg_addr[128];
+
+      ctx->pc  = pc;
+      char* sp = (char*)(long)current->stack.tos;
+
+      while(argv[i]){
+        int len = strlen(argv[i]) + 1;
+        sp = sp - len;
+        memcpy(sp, argv[i], len);
+        arg_addr[i++] = sp;
+      }
+      arg_addr[i] = 0;
+
+      //align %8
+      sp = sp - 4;
+      while((uint32_t)sp%8) sp = sp - 1;
+      
+      sp = sp - (i+1)*sizeof(char*);
+      memcpy(sp, arg_addr, (i+1)*sizeof(char*));
+      
+      ctx->pc = pc;
+      ctx->sp = (uint32_t)sp;
+      ctx->lr = (uint32_t)&__user_exit;
+      ctx->gpr[0] = i;
+      ctx->gpr[1] = ctx->sp;
+      update_ctx(current, ctx);
+      break;
+    }
+    case 0x07 : { //int pids=procs(int* buff)
+      int* buff = (int*) ctx->gpr[0];
+      pidkey_t* temp = ht_ptr->keyset.head;
+      int i = 0;
+      while(temp){
+        buff[i++] = temp->pid;
+        temp = temp->next;
+      }
+      ctx->gpr[0] = i;
+      break;
+    }
+    case 0x08 : { //char* procstat(int pid)
+      pid_t pid = (pid_t) ctx->gpr[0];
+      pcb_t* pcb = find_pid_ht(ht_ptr, pid);
+      if(!pcb)
+        ctx->gpr[0] = -1; //terminated
+      else if(pid == ib_ptr->pid)
+        ctx->gpr[0] = 0; //foreground
+      else if(pcb->proc_state == RUNNING || pcb->proc_state == READY)
+        ctx->gpr[0] = 1; //running
+      else if(pcb->proc_state == BLOCKED)
+        ctx->gpr[0] = 2; //blocked
+      else
+        ctx->gpr[0] = 3; //stopped temporarily
+      break;
+    }
+    case 0x09 : { //kill(pid, signal)
+      int pid    = (int) ctx->gpr[0];
+      int signal = (int) ctx->gpr[1];
+      switch(signal){
+        case SIGCONT:
+            if(find_pid_ht(ht_ptr,pid)==NULL)
+                break;
+            unblock_by_pid(pid);//if it is blocked
+            //scheduler( ctx );
+            break;
+        case SIGTERM:
+            __exit(ctx, 1, pid);
+            break;
+        default:
+            break;
+      }
+      break;
+    }
+    case 0x0A : { //nice(int pid, int priority) should only be called by shell
+      int pid      = (int) ctx->gpr[0];
+      int priority = (int) ctx->gpr[1];
+      if(current->pid != 1)
+        break;
+      pcb_t* p = find_pid_ht(ht_ptr,pid);
+      if(!p)
+        break;
+      setPriority(p, priority);
       break;
     }
     default   : { // unknown

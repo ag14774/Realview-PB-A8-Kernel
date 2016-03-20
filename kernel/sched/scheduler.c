@@ -3,51 +3,74 @@
 #define NORM_THRES 0x80000000
 
 pcb_t* current = NULL;
-pcb_t* blocking[MAX_BLOCKING];
+list_t blocking;
 queue_t q;
 hashtable_t ht;
-hashtable_t* ht_ptr;
 user_stack us;
 input_buff ib;
+
+hashtable_t* ht_ptr;
 input_buff* ib_ptr;
 
-void unblock_by_index(uint32_t index){
-    pcb_t* blocked = blocking[index];
-    blocking[index] = NULL;
-    schedule(blocked->pid);
-}
-
-void unblock_by_pid(pid_t pid){//you can search in the hashtable and check queue_index to speed up things. if it is scheduled, it is not blocked
-    for(int i=0;i<MAX_BLOCKING;i++){
-        if(blocking[i] && blocking[i]->pid == pid){
-            unblock_by_index(i);
+void unblock_by_pid(pid_t pid){
+    pcb_t* p = find_pid_ht(&ht, pid);
+    if(p->queue_index!=-1){
+        p->proc_state = READY;
+        return;
+    }
+    node* temp = blocking.head;
+    node* prev = NULL;
+    while(temp){
+        if(temp->addr == p){
+            if(blocking.head == temp){
+                blocking.head = temp->next;
+            }
+            if(blocking.tail == temp){
+                blocking.tail = prev;
+            }
+            if(prev){
+                prev->next = temp->next;
+            }
+            free(temp);
+            schedule(p->pid);
             return;
         }
+        prev = temp;
+        temp = temp->next;
     }
 }
 
-void unblock_random(){ //It might need to add check for WAITING
-    for(int i=0;i<MAX_BLOCKING;i++){
-        if(blocking[i]!=NULL){
-            unblock_by_index(i);
-            return;
+void unblock_head(){ //It might need to add check for WAITING
+    node* n = blocking.head;
+    if(n){
+        blocking.head = n->next;
+        if(blocking.tail == n){
+            blocking.tail = NULL;
         }
+        schedule(n->addr->pid);
+        free(n);
     }
 }
 
-int block_pid(pid_t pid, proc_state_t reason){
-    deschedule(pid);
+int block_pid(pid_t pid){
     pcb_t* p = find_pid_ht(&ht, pid);
     if(p){
-        p->proc_state = reason;
-        for(int i = 0;i<MAX_BLOCKING;i++){
-            if(!blocking[i]){
-                blocking[i] = p;
-                if(pid == current->pid)
-                    current = NULL;
-                return 0;
-            }
+        deschedule(pid);
+        node* new = malloc(sizeof(node));
+        if(!new)
+            return -1;
+        new->next = NULL;
+        new->addr = p;
+        if(blocking.head == NULL){
+            blocking.head = new;
         }
+        else {
+            blocking.tail->next = new;
+        }
+        blocking.tail = new;
+        if(pid == current->pid)
+            current = NULL;
+        return 0;
     }
     return -1;
 }
@@ -55,11 +78,12 @@ int block_pid(pid_t pid, proc_state_t reason){
 void scheduler(ctx_t* ctx){ //signal normalisation if normalisation_threshold exceeded
     if(current){
         update_ctx(current, ctx);
-        update_runtime(current);
         if(current->proc_state == BLOCKED || current->proc_state == WAITING)
-            block_pid(current->pid, current->proc_state);
-        else
+            block_pid(current->pid);
+        else{
+            update_runtime(current);
             insert(&q, current);
+        }
         normalise_vruntimes();
     }
     current = NULL;
@@ -70,15 +94,17 @@ void scheduler(ctx_t* ctx){ //signal normalisation if normalisation_threshold ex
                 unblock_by_pid(ib.pid);
             }
             else {
-                unblock_random();
+                unblock_head();
             }
         }
         else if(current->proc_state == BLOCKED || current->proc_state == WAITING){
-            block_pid(current->pid, current->proc_state);
+            block_pid(current->pid);
             current = NULL;
         }
     }
     current->proc_state = RUNNING;
+    if(!current->ph.parent)
+        current->ph.parent = find_pid_ht(&ht,1);
     restore_ctx(ctx,current);
 }
 
@@ -90,6 +116,8 @@ void initialise_scheduler(uint32_t init_stack){ //init all data structures here
     us.len = 0;
     us.tos = init_stack;
     flush_buff(&ib);
+    ht.keyset.head = NULL;
+    ht.keyset.tail = NULL;
     ht_ptr = &ht;
     ib_ptr = &ib;
 }
@@ -98,7 +126,7 @@ int schedule(pid_t pid){ //returns -1 if unsuccessful
     pcb_t* pcb = find_pid_ht(&ht, pid);
     if(!pcb || pcb->queue_index!=-1)
         return -1; //pid does not exist in hashtable or already scheduled
-    if(pcb->vruntime == 0)
+    if(pcb->vruntime < q.min_vruntime) //check if ten times more than the minimum
         pcb->vruntime = q.min_vruntime;
     insert(&q, pcb);
     return 0;

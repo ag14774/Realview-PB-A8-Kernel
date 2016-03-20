@@ -40,6 +40,8 @@ int dequeue(queue_t* q, pcb_t* p){
     pcb_t* res = extract_min(q);
     if(p == res)
         return 0;
+    if(res)
+        insert(q, res); //something wrong happened. put it back
     return -1;
 }
 
@@ -75,9 +77,8 @@ pcb_t* extract_min(queue_t* q){
     q->pcbs[i]->queue_index = i;
     if(q->processes != 0)
         q->min_vruntime = q->pcbs[0]->vruntime; //update min_vruntime
-    else
-        q->min_vruntime = 0;
+    //else
+    //    q->min_vruntime = 0;
     pcb->queue_index = -1;
-    pcb->proc_state = READY; //this will change to RUNNING if proc moves to *current
     return pcb;
 }

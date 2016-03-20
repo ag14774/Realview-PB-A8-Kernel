@@ -61,11 +61,68 @@ int read( int fd, void* x, size_t n ) {
   return r;
 }
 
+int procs(void* x){
+  int r;
+  
+  asm volatile( "mov r0, %1 \n"
+                "svc #7     \n"
+                "mov %0, r0 \n"
+              : "=r" (r)
+              : "r" (x)
+              : "r0");
+  
+  return r;
+
+}
+
+int procstat(int p){
+  int r;
+  asm volatile( "mov r0, %1 \n"
+                "svc #8     \n"
+                "mov %0, r0 \n"
+              : "=r" (r)
+              : "r" (p)
+              : "r0" );
+  return r;
+}
+
+int exec(const char *path, char *const argv[]){
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "mov r1, %2 \n"
+                "svc #6     \n"
+                "mov %0, r0 \n"
+              : "=r" (r)
+              : "r" (path), "r" (argv)
+              : "r0", "r1" );
+
+  return r;
+}
+
+void kill(int pid, int signal){
+  asm volatile( "mov r0, %0 \n"
+                "mov r1, %1 \n"
+                "svc #9     \n"
+              :  
+              : "r" (pid), "r" (signal)
+              : "r0", "r1" );
+}
+
+void nice(int pid, int priority){
+    asm volatile( "mov r0, %0 \n"
+                  "mov r1, %1 \n"
+                  "svc #10    \n"
+                : /* No outputs. */
+                : "r" (pid), "r" (priority)
+                : "r0", "r1" );
+}
+
 int read_line(char b[], size_t array_size){
   int chars = 0;
   if(array_size > 500)
     array_size = 500;
-  chars = read(1, b, array_size);
+  chars = read(0, b, array_size);
   if(chars == array_size){
     b[chars-1] = '\0';
   }
@@ -77,7 +134,7 @@ int read_line(char b[], size_t array_size){
 }
 
 /**
- * A custom printf that only supports %d
+ * A custom printf that only supports %d and %s
  */
 int printF(const char* f, ...){
     va_list args;      //Define a list of variables
@@ -126,7 +183,7 @@ int printF(const char* f, ...){
     }
     buffer[x]='\0';
     len = strlen(buffer);
-    done = write(0, buffer, len);
+    done = write(1, buffer, len);
     va_end(args);
     return done;
 }

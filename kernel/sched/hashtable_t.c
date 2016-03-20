@@ -28,6 +28,10 @@ int insert_ht(hashtable_t* ht, pid_t pid, uint32_t cpsr, uint32_t pc,
     pcb->queue_index = -1;
     pcb->proc_state  = CREATED;
     ht->processes = ht->processes + 1;
+    
+    //add to keyset
+    pcb->keyindex = add_key(&ht->keyset,pid);
+    
     return 0;
 }
 
@@ -46,13 +50,17 @@ int insert_ht_by_pointer(hashtable_t* ht, pid_t pid, stack_info si, pcb_t* p){ /
     memcpy(pcb, p, sizeof(pcb_t) );
     pcb->pid = pid;
     memset(&pcb->ph,0,sizeof(proc_hierarchy));
-    add_child(ht, p, pid); //(ht,parent,childpid)
+    add_child(p, pcb); //(parent,child)
     pcb->stack       = si;
     pcb->ctx.sp      = p->ctx.sp - p->stack.tos + si.tos; //correct stack pointer
     pcb->vruntime    = 0;
     pcb->queue_index = -1;
     pcb->proc_state  = CREATED;
     ht->processes    = ht->processes + 1;
+    
+    //add to keyset
+    pcb->keyindex = add_key(&ht->keyset,pid);
+    
     return 0;
 }
 
@@ -63,8 +71,9 @@ int delete_ht(hashtable_t* ht, pid_t pid) { //returns -1 if unsuccessful
         return -1;
     if(pcb->queue_index != -1)
         return -2;
-    pcb_t* parent = find_pid_ht(ht, pcb->ph.parent);
-    remove_child(ht, parent, pid); //pid is the pid of child. all of its children will set their parent to 1, and parent will remove pid form its children
+    remove_children(pcb);
+    remove_child(pcb);
+    remove_key(&ht->keyset,(pidkey_t*)pcb->keyindex);
     memset(pcb, 0, sizeof(pcb_t) ); //setting pid to 0 might be faster
     ht->processes = ht->processes - 1;
     return 0;
@@ -81,33 +90,33 @@ pcb_t* find_pid_ht(hashtable_t* ht, pid_t pid) { //return null if not found
     return NULL;
 }
 
-//THIS IS NOT NICE. MOVE TO PCB_T_H AND USE A BETTER DATA STRUCTURE
-int add_child(hashtable_t* ht, pcb_t* parent, pid_t child){
-    pcb_t* child_pcb = find_pid_ht(ht, child);
-    child_pcb->ph.parent = parent->pid;
-    for(int i = 0;i<MAX_CHILD;i++){
-        if(parent->ph.children[i] == 0){
-            parent->ph.children[i] = child;
-            return 0;
-        }
+pidkey_t* add_key(keyset_t* keyset, pid_t pid){
+    pidkey_t* key = malloc(sizeof(pidkey_t));
+    if(!key)
+        return NULL;
+    key->pid = pid;
+    if(keyset->head == NULL && keyset->tail == NULL){
+        keyset->head = key;
+        keyset->tail = key;
+        key->prev = NULL;
+        key->next = NULL;
     }
-    return -1;
+    else{
+        keyset->tail->next = key;
+        key->prev = keyset->tail;
+        keyset->tail = key;
+        key->next = NULL;
+    }  
 }
 
-int remove_child(hashtable_t* ht, pcb_t* parent, pid_t child){
-    pcb_t* child_pcb = find_pid_ht(ht, child);
-    pcb_t* childschild;
-    for(int i = 0;i<MAX_CHILD;i++){
-        if(child_pcb->ph.children[i] != 0)
-        childschild = find_pid_ht(ht, child_pcb->ph.children[i]);
-        childschild->ph.parent = 1; //make everyone's pid = 1
-    }
-    for(int i = 0;i<MAX_CHILD;i++){
-        if(parent->ph.children[i] == child){
-            parent->ph.children[i] = 0;
-            return 0;
-        }
-    }
-    return -1;
+void remove_key(keyset_t* keyset, pidkey_t* key){
+    if(key==keyset->head)
+        keyset->head = key->next;
+    if(key==keyset->tail)
+        keyset->tail = key->prev;
+    if(key->prev)
+        key->prev->next = key->next;
+    if(key->next)
+        key->next->prev = key->prev;
+    free(key);
 }
-
