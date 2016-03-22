@@ -29,7 +29,7 @@ void add_proc(int pid, char* name){
 }
 
 void remove_proc(int jobID){
-    proc_table.proc[jobID].jobnumber = 0;
+    proc_table.proc[jobID].jobnumber = -1;
     proc_table.freeJobID[++proc_table.freeJobIDpointer] = jobID;
 }
 

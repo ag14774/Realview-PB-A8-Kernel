@@ -91,7 +91,7 @@ int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int fla
         case pipe:
             if(globalID>=0 && filetable_ptr->entries[globalID].active){
                 if(filetable_ptr->entries[globalID].type != type)
-                    break;
+                    return -1;
                 globalID = get_global_entry(filetable_ptr, globalID);
                 inode = filetable_ptr->entries[globalID].inode;
                 inode = get_pipe(pipes_ptr, inode);
@@ -113,8 +113,10 @@ int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int fla
         case file:
             break;
         default:
+            return -1;
             break;
     }
+    return 0;
 }
 
 void process_char_stdout(uint8_t c){
@@ -174,8 +176,11 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   programs[3].entry = (uint32_t)entry_genPrimes;
 
   initialise_scheduler((uint32_t)&tos_irq);
-  pid_t temp;
-  temp = init_pcb((uint32_t)entry_shell);
+  
+  pid_t temp = init_pcb((uint32_t)entry_shell);
+  pcb_t* p = find_pid_ht(ht_ptr, temp);
+  __open(p, 0, -1, stdio, -1, READ_ONLY);
+  __open(p, 1, -1, stdio, -1, WRITE_ONLY);
   schedule(temp);
 
   //temp = init_pcb((uint32_t)entry_P0);
@@ -252,21 +257,44 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       break;
     }
     case 0x01 : { // write( fd, x, n )
-      int   fd = ( int   )( ctx->gpr[ 0 ] );  
-      char*  x = ( char* )( ctx->gpr[ 1 ] );  
-      int    n = ( int   )( ctx->gpr[ 2 ] );
-      pid_t pid = current->pid;
-      if(pid>1){
-        PL011_puth(UART0, pid);
-        PL011_putc(UART0, ':');
-        PL011_putc(UART0, ' ');
+      int   fd = ( int   )( ctx->gpr[ 0 ] );
+      fd_entry* fentry = &current->fdtable.fd[fd];
+      if(!fentry->active || fentry->flags == READ_ONLY){
+        ctx->gpr[0] = -1;
+        break;
       }
-
-      for( int i = 0; i < n; i++ ) {
-        PL011_putc( UART0, *x++ );
+      global_entry* gentry = &filetable_ptr->entries[fentry->globalID];
+      if(!gentry->active){
+        ctx->gpr[0] = -1;
+        break;
       }
-      
-      ctx->gpr[ 0 ] = n;
+      switch(gentry->type){
+        case stdio : {
+          char*  x = ( char* )( ctx->gpr[ 1 ] );  
+          int    n = ( int   )( ctx->gpr[ 2 ] );
+          pid_t pid = current->pid;
+          if(pid>1){
+            PL011_puth(UART0, pid);
+            PL011_putc(UART0, ':');
+            PL011_putc(UART0, ' ');
+          }
+          for( int i = 0; i < n; i++ ) {
+            PL011_putc( UART0, *x++ );
+          }
+          ctx->gpr[ 0 ] = n;
+          break;
+        }
+        case pipe : {
+          break;
+        }
+        case file : {
+          break;
+        }
+        default : {
+          ctx->gpr[0] = -1;
+          break;
+        }
+      }
       break;
     }
     case 0x02 : { //fork()
@@ -283,30 +311,55 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       __exit(ctx, 1, current->pid);
       break;
     }
-    case 0x04 : { //read(fd, x, n) //SHOULD ALSO RETURN READY WHEN N CHARACTERS ARE READ
-      //when you press enter, the buffer should become ready
-      //it should stay ready until i == n
-      //do not accept characters while it's ready
-      //once flushed accept more
-      int   fd = ( int   )( ctx->gpr[ 0 ] );
-      char*  x = ( char* )( ctx->gpr[ 1 ] );
-      int    n = ( int   )( ctx->gpr[ 2 ] );
-      if(ib_ptr->pid != current->pid || !ib_ptr->ready){
-        __ioctl(0, current->pid); //if nobody has ownership then give ownership
-        ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
-        current->proc_state = BLOCKED;
-        scheduler(ctx);
+    case 0x04 : { //read(fd, x, n)
+      int fd = (int)(ctx->gpr[0]);
+      fd_entry* fentry = &current->fdtable.fd[fd];
+      if(!fentry->active || fentry->flags == WRITE_ONLY){
+        ctx->gpr[0] = -1;
         break;
       }
-      int i = 0;
-      for(i=0;i<n;i++){
-        x[i] = consume_char(ib_ptr);
-        if(!ib_ptr->ready){
-          i = i + 1;
+      global_entry* gentry = &filetable_ptr->entries[fentry->globalID];
+      if(!gentry->active){
+        ctx->gpr[0] = -1;
+        break;
+      }
+      switch(gentry->type){
+        case stdio : {
+          //when you press enter, the buffer should become ready
+          //it should stay ready until i == n
+          //do not accept characters while it's ready
+          //once flushed accept more
+          char*  x = ( char* )( ctx->gpr[ 1 ] );
+          int    n = ( int   )( ctx->gpr[ 2 ] );
+          if(ib_ptr->pid != current->pid || !ib_ptr->ready){
+            __ioctl(0, current->pid); //if nobody has ownership then give ownership
+            ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
+            current->proc_state = BLOCKED;
+            scheduler(ctx);
+            break;
+          }
+          int i = 0;
+          for(i=0;i<n;i++){
+            x[i] = consume_char(ib_ptr);
+            if(!ib_ptr->ready){
+              i = i + 1;
+              break;
+            }
+          }
+          ctx->gpr[0] = i;
+          break;
+        }
+        case pipe : {
+          break;
+        }
+        case file : {
+          break;
+        }
+        default : {
+          ctx->gpr[0] = -1;
           break;
         }
       }
-      ctx->gpr[0] = i;
       break;
     }
     case 0x05 : { //waitpid(int pid) if pid is not in the queue, add it.
