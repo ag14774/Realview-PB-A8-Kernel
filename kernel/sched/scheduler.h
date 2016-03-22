@@ -5,6 +5,7 @@
 #include "hashtable_t.h"
 #include "free_stack.h"
 #include "input_buffer.h"
+#include "fs.h"
 
 typedef struct node{
     struct node* next;

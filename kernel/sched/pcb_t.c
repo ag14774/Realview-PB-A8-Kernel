@@ -103,30 +103,35 @@ int isChildOf(pcb_t* parent, pcb_t* child){
 }
 
 
-fcb_entry* find_fcb_entry(pcb_t* pcb, int fd){
-    return &pcb->fcb.entries[fd];
+int  getFileDes(pcb_t* pcb, int fd){ //returns filedes
+    if(fd>=0){
+        if(!pcb->fdtable.fd[fd].active){
+            pcb->fdtable.fd[fd].active = 1;
+            pcb->fdtable.count++;
+        }
+        return fd;
+    }
+    for(int i=0;i<MAXFD;i++){
+        if(!pcb->fdtable.fd[i].active){
+            pcb->fdtable.fd[i].active = 1;
+            pcb->fdtable.count++;
+            return i;
+        }
+    }
+    return -1;
 }
 
-fcb_entry* find_fcb_empty(pcb_t* pcb){
-    int fd = get_free_fd(&pcb->fcb.alloc);
-    fcb_entry* entry = &pcb->fcb.entries[fd];
-    entry->local_fd = fd;
-    //entry->global_fd = -1;
-    entry->offset = 0;
-    return entry;
+void setFileDes(pcb_t* pcb, int fd, int globalID, int flags, int rwpointer){
+    if(!pcb->fdtable.fd[fd].active)
+        return;
+    pcb->fdtable.fd[fd].fd = fd;
+    pcb->fdtable.fd[fd].globalID = globalID;
+    pcb->fdtable.fd[fd].flags = flags;
+    pcb->fdtable.fd[fd].rwpointer = rwpointer;
 }
 
-void destroy_fcb(pcb_t* pcb, int fd){
-    fcb_entry* entry = find_fcb_entry(pcb, fd);
-    declare_free_fd(&pcb->fcb.alloc, fd);
-    entry->local_fd = -1;
-    entry->global_fd = -1;
-    entry->offset = 0;
-}
-
-fcb_entry* create_fcb(pcb_t* pcb, int global_fd){
-    fcb_entry* entry = find_fcb_empty(pcb);
-    entry->global_fd = global_fd;
-    return entry;
+int  closeFileDes(pcb_t* pcb, int fd){ //returns globalID to be used to decrease globalID count.
+    pcb->fdtable.fd[fd].active = 0;
+    return pcb->fdtable.fd[fd].globalID;
 }
 

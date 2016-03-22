@@ -12,6 +12,8 @@
 extern pcb_t *current;
 extern hashtable_t* ht_ptr;
 extern input_buff* ib_ptr;
+extern pipes_t* pipes_ptr;
+extern global_table* filetable_ptr;
 
 //file_table_entry global_table[100];
 
@@ -64,6 +66,55 @@ void __exit(ctx_t* ctx, int destroy, pid_t pid){
     temp->proc_state = WAITING;
   }
   scheduler( ctx );
+}
+
+int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int flags){
+    if(!p)
+        return -1;
+    if(fd>=0 && p->fdtable.fd[fd].active)
+        return -1;
+    int fd2 = getFileDes(p, fd);
+    if(fd2<0)
+        return -1;
+    switch(type){
+        case stdio:
+            if(!filetable_ptr->entries[0].active){
+                get_global_entry(filetable_ptr, 0); //0 is always the stdio entry
+                setGlobalEntry(filetable_ptr, 0, 0, NULL, type);
+            }
+            setFileDes(p, fd2, 0, flags, 0);
+            filetable_ptr->entries[0].refcount++;
+            break;
+        //If given globalID is active, then choose that
+        //Otherwise, check if given inode is active
+        //Otherwise, generate or activate the given globalID and inode
+        case pipe:
+            if(globalID>=0 && filetable_ptr->entries[globalID].active){
+                if(filetable_ptr->entries[globalID].type != type)
+                    break;
+                globalID = get_global_entry(filetable_ptr, globalID);
+                inode = filetable_ptr->entries[globalID].inode;
+                inode = get_pipe(pipes_ptr, inode);
+            }
+            else if(inode>=0 && pipes_ptr->p[inode].active) {
+                globalID = pipes_ptr->p[inode].globalID;
+                globalID = get_global_entry(filetable_ptr, globalID);
+                inode = get_pipe(pipes_ptr, inode);
+            }
+            else {
+                globalID = get_global_entry(filetable_ptr, globalID);
+                inode = get_pipe(pipes_ptr, inode);
+                setPipe(pipes_ptr, inode, globalID); //connect pipe with globalID
+                setGlobalEntry(filetable_ptr, globalID, inode, NULL, type); //connect globalID with pipe
+            }
+            setFileDes(p, fd2, globalID, flags, 0); //connect FileDes with globalID
+            filetable_ptr->entries[globalID].refcount++;
+            break;
+        case file:
+            break;
+        default:
+            break;
+    }
 }
 
 void process_char_stdout(uint8_t c){
@@ -119,6 +170,8 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   programs[1].entry = (uint32_t)entry_P1;
   programs[2].name  = "P2";
   programs[2].entry = (uint32_t)entry_P2;
+  programs[3].name  = "genPrimes";
+  programs[3].entry = (uint32_t)entry_genPrimes;
 
   initialise_scheduler((uint32_t)&tos_irq);
   pid_t temp;

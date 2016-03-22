@@ -8,9 +8,13 @@ queue_t q;
 hashtable_t ht;
 user_stack us;
 input_buff ib;
+pipes_t pipes;
+global_table filetable;
 
 hashtable_t* ht_ptr;
 input_buff* ib_ptr;
+pipes_t* pipes_ptr;
+global_table* filetable_ptr;
 
 void unblock_by_pid(pid_t pid){
     pcb_t* p = find_pid_ht(&ht, pid);
@@ -120,6 +124,8 @@ void initialise_scheduler(uint32_t init_stack){ //init all data structures here
     ht.keyset.tail = NULL;
     ht_ptr = &ht;
     ib_ptr = &ib;
+    pipes_ptr = &pipes;
+    filetable_ptr = &filetable;
 }
 
 int schedule(pid_t pid){ //returns -1 if unsuccessful
@@ -156,6 +162,11 @@ pid_t init_pcb(uint32_t pc){
     }
     if(error == -2)
         return -2; //-2 out of space!
+    //pcb_t* p = find_pid_ht(&ht, pid);
+    //int stdinfd = getFileDes(p);
+    //int globalfd = get_global_entry(&filetable);
+    //filetable->entries[globalfd].refcount++;
+    //setFileDes(pcb_t* pcb, int fd, int globalID, int flags, int rwpointer)
     return pid;
 }
 

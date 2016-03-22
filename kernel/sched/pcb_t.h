@@ -7,10 +7,15 @@
 #include <stdlib.h>
 
 #include "sbrk.h"
-#include "fd.h"
 
 #define MAX_PRIORITY 1
 #define MIN_PRIORITY 20
+
+#define MAXFD 30
+
+#define READ_ONLY 0xF1
+#define WRITE_ONLY 0xF2
+#define READ_WRITE 0xF3
 
 /* The kernel source code is made simpler by three type definitions:
  *
@@ -36,6 +41,19 @@ typedef struct ctx_t { //DO NOT MODIFY THIS
 } ctx_t;
 
 typedef int pid_t;
+
+typedef struct{
+    int fd;
+    int globalID;
+    int flags;
+    int rwpointer;
+    uint8_t active;
+} fd_entry;
+
+typedef struct{
+    fd_entry fd[30];
+    int count;
+} fdtable_t;
 
 typedef struct child_t{
   pcb_t* caddr;
@@ -63,7 +81,7 @@ typedef struct pcb_t {
   proc_hierarchy ph;
   stack_info stack;
   proc_state_t proc_state;
-  fcb_t fcb;
+  fdtable_t fdtable;
   uint8_t priority; //1(highest)-20
   uint32_t vruntime; //vruntime = vruntime + priority
   int queue_index;
@@ -81,9 +99,10 @@ void remove_child(pcb_t* child);
 void remove_children(pcb_t* parent);
 int isChildOf(pcb_t* parent, pcb_t* child);
 
-fcb_entry* find_fcb_entry(pcb_t* pcb, int fd);
-fcb_entry* find_fcb_empty(pcb_t* pcb);
-void destroy_fcb(pcb_t* pcb, int fd);
-fcb_entry* create_fcb(pcb_t* pcb,  int global_fd);
+
+int  getFileDes(pcb_t* pcb, int fd); //returns filedes. if fd==-1, it returns the first free fd
+void setFileDes(pcb_t* pcb, int fd, int globalID, int flags, int rwpointer);
+int  closeFileDes(pcb_t* pcb, int fd); //returns globalID to be used to decrease globalID count.
+
 
 #endif
