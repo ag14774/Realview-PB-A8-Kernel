@@ -7,6 +7,5 @@
 #include "libc.h"
 
 extern int (*entry_genPrimes)(int argc, char** argv); 
-extern uint32_t tos_genPrimes;
 
 #endif

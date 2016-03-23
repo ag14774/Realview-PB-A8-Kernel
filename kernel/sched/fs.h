@@ -2,26 +2,22 @@
 #define __FS_H
 
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
-#include "sbrk.h"
 
 #define MAXPIPES  50
 #define MAXGLOBAL 50
-#define PIPESIZE  100
+#define PIPESIZE  500
+#define PIPE_WQ   15
 
 typedef int i_node;
 
 typedef enum {stdio, pipe, file} file_type;
 
-typedef struct wait_node{
-    struct wait_node* next;
-    int pid;
-} wait_node;
-
 typedef struct{
-    wait_node* head;
-    wait_node* tail;
+    int head;
+    int tail;
+    int pids[PIPE_WQ];
+    int len;
 } wait_queue;
 
 typedef struct{
@@ -46,7 +42,8 @@ typedef struct{
     i_node inode;
     char name[20];
     file_type type;
-    wait_queue wq;
+    wait_queue wqwrite;
+    wait_queue wqread;
 } global_entry;
 
 typedef struct{
@@ -56,8 +53,8 @@ typedef struct{
 
 int get_global_entry(global_table* t, int globalID); //if globalID negative, then return the first that is free
 void setGlobalEntry(global_table* t, int globalID, i_node inode, char name[], file_type type);
-void enqueue_wq(global_table* t, int globalID, int pid);
-int dequeue_wq(global_table* t, int globalID); //return 0 if empty;
+void enqueue_wq(global_table* t, int globalID, int queue, int pid); //queue 0 is write, read otherwise
+int dequeue_wq(global_table* t, int globalID, int queue); //queue 0 is write, read otherwise. return 0 if empty;
 int close_global_entry(global_table* t, int globalID); //make sure that the pipe or file is closed
 
 void reset_pipe(pipes_t* pipes, i_node inode);

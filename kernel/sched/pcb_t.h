@@ -6,12 +6,10 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "sbrk.h"
-
 #define MAX_PRIORITY 1
 #define MIN_PRIORITY 20
 
-#define MAXFD 30
+#define MAXFD 15
 
 #define READ_ONLY 0xF1
 #define WRITE_ONLY 0xF2
@@ -51,23 +49,19 @@ typedef struct{
 } fd_entry;
 
 typedef struct{
-    fd_entry fd[30];
+    fd_entry fd[MAXFD];
     int count;
 } fdtable_t;
 
-typedef struct child_t{
-  pcb_t* caddr;
-  struct child_t* next;
-} child_t;
-
 typedef struct {
-  child_t* head;
-  child_t* tail;
+  pcb_t* head;
+  pcb_t* tail;
 } children_t;
 
 typedef struct proc_hierarchy {
   pcb_t* parent;
   children_t children;
+  pcb_t* sibling;
 } proc_hierarchy;
 
 typedef struct stack_info {
@@ -85,8 +79,10 @@ typedef struct pcb_t {
   uint8_t priority; //1(highest)-20
   uint32_t vruntime; //vruntime = vruntime + priority
   int queue_index;
-  void* keyindex; //used by the hashtable
-  //maybe add block_index too?
+  //used by hashtable
+  struct pcb_t* prev;
+  struct pcb_t* next;
+  //*****************
 } pcb_t;
 
 void update_runtime(pcb_t *pcb);
@@ -98,7 +94,6 @@ void add_child(pcb_t* parent, pcb_t* child);
 void remove_child(pcb_t* child);
 void remove_children(pcb_t* parent);
 int isChildOf(pcb_t* parent, pcb_t* child);
-
 
 int  getFileDes(pcb_t* pcb, int fd); //returns filedes. if fd==-1, it returns the first free fd
 void setFileDes(pcb_t* pcb, int fd, int globalID, int flags, int rwpointer);

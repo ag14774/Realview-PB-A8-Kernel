@@ -22,6 +22,7 @@
 #include "P1.h"
 #include "P2.h"
 #include "genPrimes.h"
+#include "testPipe.h"
 
 #define SIGCONT 0xA0
 #define SIGTERM 0xA1

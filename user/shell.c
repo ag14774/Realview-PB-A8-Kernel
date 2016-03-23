@@ -153,7 +153,7 @@ void shell() {
     while( 1 ) {
         printF(">");
         int n = read_line(line,50);
-        line[n-2] = '\0';
+        line[n-1] = '\0';
         char *line_new = trimwhitespace(line);
         parse_command(line_new, argbuff);
         char *cmd = argbuff[0];//parse here

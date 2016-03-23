@@ -9,8 +9,6 @@ SECTIONS {
   .bss  : {                           *(.bss         ) } 
   /* align  address (per AAPCS)  */
   .       = ALIGN(8);
-  boh     = .;
-  .       = . + 0x00800000;
   /* allocate stack for svc mode */
   .       = . + 0x00001000;
   tos_svc = .;

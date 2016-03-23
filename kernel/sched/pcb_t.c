@@ -27,18 +27,14 @@ void add_child(pcb_t* parent, pcb_t* child){
     proc_hierarchy* parentph = &parent->ph;
     proc_hierarchy* childph = &child->ph;
     childph->parent = parent;
-    child_t* newchild = malloc(sizeof(child_t));
-    if(!newchild)
-        return;
-    newchild->caddr = child;
-    newchild->next = NULL;
+    childph->sibling = NULL;
     if(parentph->children.head == NULL){
-        parentph->children.head = newchild;
+        parentph->children.head = child;
     }
     else {
-        parentph->children.tail->next = newchild;
+        parentph->children.tail->ph.sibling = child;
     }
-    parentph->children.tail = newchild;
+    parentph->children.tail = child;
 }
 
 /*
@@ -54,25 +50,25 @@ void remove_child(pcb_t* child){
         return;
     proc_hierarchy* parentph = &parent->ph;
     proc_hierarchy* childph  = &child->ph;
-    childph->parent = NULL;
-    child_t* temp = parentph->children.head;
-    child_t* prev = NULL;
+    childph->parent  = NULL;
+    pcb_t* temp = parentph->children.head;
+    pcb_t* prev = NULL;
     while(temp){
-        if(temp->caddr == child){
+        if(temp == child){
             if(parentph->children.head == temp){
-                parentph->children.head = temp->next;
+                parentph->children.head = temp->ph.sibling;
             }
             if(parentph->children.tail == temp){
                 parentph->children.tail = prev;
             }
             if(prev){
-                prev->next = temp->next;
+                prev->ph.sibling = temp->ph.sibling;
             }
-            free(temp);
+            temp->ph.sibling = NULL;
             return;
         }
         prev = temp;
-        temp = temp->next;
+        temp = temp->ph.sibling;
     }
 }
 
@@ -85,12 +81,12 @@ void remove_child(pcb_t* child){
 */
 void remove_children(pcb_t* parent){
     proc_hierarchy* parentph = &parent->ph;
-    child_t* temp = parentph->children.head;
+    pcb_t* temp = parentph->children.head;
     while(temp){
-        child_t* temp2 = temp;
-        temp = temp->next;
-        temp2->caddr->ph.parent = NULL;
-        free(temp2);
+        pcb_t* temp2 = temp;
+        temp = temp->ph.sibling;
+        temp2->ph.parent = NULL;
+        temp2->ph.sibling = NULL;
     }
     parentph->children.head = NULL;
     parentph->children.tail = NULL;

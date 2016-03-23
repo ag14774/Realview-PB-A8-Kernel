@@ -7,16 +7,6 @@
 #include "input_buffer.h"
 #include "fs.h"
 
-typedef struct node{
-    struct node* next;
-    pcb_t* addr;
-} node;
-
-typedef struct{
-    node* head;
-    node* tail;
-} list_t;
-
 void  scheduler(ctx_t* ctx);
 int   schedule(pid_t pid); //returns -1 if unsuccessful
 int   deschedule(pid_t pid); //returns -1 if unsuccessful
@@ -27,7 +17,7 @@ pid_t init_pcb_by_pointer(pcb_t* pcb);
 int   destroy_pid(pid_t pid);
 
 void  unblock_by_pid(pid_t pid);
-void  unblock_head();
+void  unblock_first();
 int   block_pid(pid_t pid);
 
 #endif

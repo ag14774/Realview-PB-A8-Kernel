@@ -34,14 +34,15 @@ int waitpid(int pid) {
 int write( int fd, void* x, size_t n ) {
   int r;
 
-  asm volatile( "mov r0, %1 \n"
+  asm volatile( "mov r3, #0 \n"
+                "mov r0, %1 \n"
                 "mov r1, %2 \n"
                 "mov r2, %3 \n"
                 "svc #1     \n"
-                "mov %0, r0 \n" 
+                "mov %0, r3 \n" 
               : "=r" (r) 
               : "r" (fd), "r" (x), "r" (n) 
-              : "r0", "r1", "r2" );
+              : "r0", "r1", "r2", "r3" );
 
   return r;
 }
@@ -49,14 +50,15 @@ int write( int fd, void* x, size_t n ) {
 int read( int fd, void* x, size_t n ) {
   int r;
 
-  asm volatile( "mov r0, %1 \n"
+  asm volatile( "mov r3, #0 \n"
+                "mov r0, %1 \n"
                 "mov r1, %2 \n"
                 "mov r2, %3 \n"
                 "svc #4     \n"
-                "mov %0, r0 \n"
+                "mov %0, r3 \n"
               : "=r" (r)
               : "r" (fd), "r" (x), "r" (n)
-              : "r0", "r1", "r2" );
+              : "r0", "r1", "r2", "r3" );
   
   return r;
 }
@@ -118,16 +120,28 @@ void nice(int pid, int priority){
                 : "r0", "r1" );
 }
 
+int getpipe(){
+    int r;
+
+    asm volatile( "svc #11    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : 
+                : "r0" );
+
+    return r;
+}
+
 int read_line(char b[], size_t array_size){
   int chars = 0;
   if(array_size > 500)
     array_size = 500;
   chars = read(0, b, array_size);
-  if(chars == array_size){
+  if(chars == 500){
     b[chars-1] = '\0';
   }
-  else if(b[chars-1] != '\0'){
-    b[chars++] = '\0';
+  else if(b[chars] != '\0'){
+    b[chars] = '\0';
   }
   
   return chars;
@@ -173,6 +187,12 @@ int printF(const char* f, ...){
                     strcat(buffer,s);
                     i++;
                     x = x + templen;
+                }
+                else if(f[i+1]=='c'){
+                    paramFound=1;
+                    num = va_arg(args, int);
+                    buffer[x++] = num;
+                    i++;
                 }
             }
         }

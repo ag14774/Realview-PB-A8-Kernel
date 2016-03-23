@@ -29,39 +29,49 @@ void setGlobalEntry(global_table* t, int globalID, i_node inode, char name[], fi
     else
         t->entries[globalID].name[0] = '\0';
     t->entries[globalID].type = type;
-    t->entries[globalID].wq.head = NULL;
-    t->entries[globalID].wq.tail = NULL;
+    t->entries[globalID].wqwrite.head = 0;
+    t->entries[globalID].wqwrite.tail = 0;
+    t->entries[globalID].wqwrite.len  = 0;
+    t->entries[globalID].wqread.head  = 0;
+    t->entries[globalID].wqread.tail  = 0;
+    t->entries[globalID].wqread.len   = 0;
 }
 
-void enqueue_wq(global_table* t, int globalID, int pid){
+void enqueue_wq(global_table* t, int globalID, int queue, int pid){
     if(!t->entries[globalID].active)
         return;
-    wait_node* new = malloc(sizeof(wait_node));
-    new->next = NULL;
-    new->pid  = pid;
-    if(!t->entries[globalID].wq.head)
-        t->entries[globalID].wq.head = new;
+    wait_queue* wq;
+    if(queue == 0)
+        wq = &t->entries[globalID].wqwrite;
     else
-        t->entries[globalID].wq.tail->next = new;
-    t->entries[globalID].wq.tail = new;
+        wq = &t->entries[globalID].wqread;
+    if(wq->len == PIPE_WQ)
+        return;
+    wq->pids[wq->tail] = pid;
+    wq->tail = (wq->tail + 1) % PIPE_WQ;
+    wq->len++;
 }
 
-int dequeue_wq(global_table* t, int globalID){ //return 0 if empty;
-    if(!t->entries[globalID].wq.head)
+int dequeue_wq(global_table* t, int queue, int globalID){ //return 0 if empty;
+    if(!t->entries[globalID].active)
         return 0;
-    int pid = t->entries[globalID].wq.head->pid;
-    wait_node* temp = t->entries[globalID].wq.head;
-    if(temp == t->entries[globalID].wq.tail)
-        t->entries[globalID].wq.tail = NULL;
-    t->entries[globalID].wq.head = temp->next;
-    free(temp);
+    wait_queue* wq;
+    if(queue == 0)
+        wq = &t->entries[globalID].wqwrite;
+    else
+        wq = &t->entries[globalID].wqread;
+    if(wq->len == 0)
+        return 0;
+    int pid = wq->pids[wq->head];
+    wq->head = (wq->head + 1) % PIPE_WQ;
+    wq->len--;
     return pid;
 }
 
 int close_global_entry(global_table* t, int globalID){ //close pipe or file first
     if(t->entries[globalID].refcount>0)
         return -1;
-    if(t->entries[globalID].wq.head)
+    if(t->entries[globalID].wqwrite.len>0 || t->entries[globalID].wqread.len>0)
         return -1;
     if(!t->entries[globalID].active)
         return -1;

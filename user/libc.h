@@ -47,4 +47,6 @@ void kill(int pid, int signal);
 
 void nice(int pid, int priority);
 
+int getpipe();
+
 #endif

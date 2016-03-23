@@ -30,7 +30,7 @@ int insert_ht(hashtable_t* ht, pid_t pid, uint32_t cpsr, uint32_t pc,
     ht->processes = ht->processes + 1;
     
     //add to keyset
-    pcb->keyindex = add_key(&ht->keyset,pid);
+    add_key(&ht->keyset, pcb);
     
     return 0;
 }
@@ -59,7 +59,7 @@ int insert_ht_by_pointer(hashtable_t* ht, pid_t pid, stack_info si, pcb_t* p){ /
     ht->processes    = ht->processes + 1;
     
     //add to keyset
-    pcb->keyindex = add_key(&ht->keyset,pid);
+    add_key(&ht->keyset, pcb);
     
     return 0;
 }
@@ -73,7 +73,7 @@ int delete_ht(hashtable_t* ht, pid_t pid) { //returns -1 if unsuccessful
         return -2;
     remove_children(pcb);
     remove_child(pcb);
-    remove_key(&ht->keyset,(pidkey_t*)pcb->keyindex);
+    remove_key(&ht->keyset, pcb);
     memset(pcb, 0, sizeof(pcb_t) ); //setting pid to 0 might be faster
     ht->processes = ht->processes - 1;
     return 0;
@@ -90,33 +90,28 @@ pcb_t* find_pid_ht(hashtable_t* ht, pid_t pid) { //return null if not found
     return NULL;
 }
 
-pidkey_t* add_key(keyset_t* keyset, pid_t pid){
-    pidkey_t* key = malloc(sizeof(pidkey_t));
-    if(!key)
-        return NULL;
-    key->pid = pid;
+void add_key(keyset_t* keyset, pcb_t* p){
     if(keyset->head == NULL && keyset->tail == NULL){
-        keyset->head = key;
-        keyset->tail = key;
-        key->prev = NULL;
-        key->next = NULL;
+        keyset->head = p;
+        keyset->tail = p;
+        p->prev = NULL;
+        p->next = NULL;
     }
     else{
-        keyset->tail->next = key;
-        key->prev = keyset->tail;
-        keyset->tail = key;
-        key->next = NULL;
+        keyset->tail->next = p;
+        p->prev = keyset->tail;
+        keyset->tail = p;
+        p->next = NULL;
     }  
 }
 
-void remove_key(keyset_t* keyset, pidkey_t* key){
-    if(key==keyset->head)
-        keyset->head = key->next;
-    if(key==keyset->tail)
-        keyset->tail = key->prev;
-    if(key->prev)
-        key->prev->next = key->next;
-    if(key->next)
-        key->next->prev = key->prev;
-    free(key);
+void remove_key(keyset_t* keyset, pcb_t* p){
+    if(p == keyset->head)
+        keyset->head = p->next;
+    if(p == keyset->tail)
+        keyset->tail = p->prev;
+    if(p->prev)
+        p->prev->next = p->next;
+    if(p->next)
+        p->next->prev = p->prev;
 }

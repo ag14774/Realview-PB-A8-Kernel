@@ -3,7 +3,6 @@
 #define NORM_THRES 0x80000000
 
 pcb_t* current = NULL;
-list_t blocking;
 queue_t q;
 hashtable_t ht;
 user_stack us;
@@ -22,37 +21,19 @@ void unblock_by_pid(pid_t pid){
         p->proc_state = READY;
         return;
     }
-    node* temp = blocking.head;
-    node* prev = NULL;
-    while(temp){
-        if(temp->addr == p){
-            if(blocking.head == temp){
-                blocking.head = temp->next;
-            }
-            if(blocking.tail == temp){
-                blocking.tail = prev;
-            }
-            if(prev){
-                prev->next = temp->next;
-            }
-            free(temp);
-            schedule(p->pid);
-            return;
-        }
-        prev = temp;
-        temp = temp->next;
-    }
+    schedule(p->pid);
 }
 
-void unblock_head(){ //It might need to add check for WAITING
-    node* n = blocking.head;
-    if(n){
-        blocking.head = n->next;
-        if(blocking.tail == n){
-            blocking.tail = NULL;
+//this function will never be called
+void unblock_first(){ //It might need to add check for WAITING
+    keyset_t* keys = &ht.keyset;
+    pcb_t* temp = keys->head;
+    while(temp){
+        if(temp->proc_state == WAITING || temp->proc_state == BLOCKED){
+            unblock_by_pid(temp->pid);
+            return;
         }
-        schedule(n->addr->pid);
-        free(n);
+        temp = temp->next;
     }
 }
 
@@ -60,18 +41,6 @@ int block_pid(pid_t pid){
     pcb_t* p = find_pid_ht(&ht, pid);
     if(p){
         deschedule(pid);
-        node* new = malloc(sizeof(node));
-        if(!new)
-            return -1;
-        new->next = NULL;
-        new->addr = p;
-        if(blocking.head == NULL){
-            blocking.head = new;
-        }
-        else {
-            blocking.tail->next = new;
-        }
-        blocking.tail = new;
         if(pid == current->pid)
             current = NULL;
         return 0;
@@ -98,7 +67,7 @@ void scheduler(ctx_t* ctx){ //signal normalisation if normalisation_threshold ex
                 unblock_by_pid(ib.pid);
             }
             else {
-                unblock_head();
+                unblock_first();
             }
         }
         else if(current->proc_state == BLOCKED || current->proc_state == WAITING){
@@ -108,7 +77,7 @@ void scheduler(ctx_t* ctx){ //signal normalisation if normalisation_threshold ex
     }
     current->proc_state = RUNNING;
     if(!current->ph.parent)
-        current->ph.parent = find_pid_ht(&ht,1);
+        add_child(find_pid_ht(ht_ptr, 1), current);
     restore_ctx(ctx,current);
 }
 

@@ -43,10 +43,37 @@ void __ioctl(pid_t from, pid_t to){
   }
 }
 
+int __close(pcb_t* p, int fd){
+    if(!p->fdtable.fd[fd].active)
+        return -1;
+    int globalID = closeFileDes(p, fd);
+    if(!filetable_ptr->entries[globalID].active)
+        return -1;
+    filetable_ptr->entries[globalID].refcount--;
+    if(filetable_ptr->entries[globalID].refcount == 0){
+        int inode = filetable_ptr->entries[globalID].inode;
+        file_type type = filetable_ptr->entries[globalID].type;
+        close_global_entry(filetable_ptr, globalID);
+        switch(type){
+            case stdio:
+                flush_buff(ib_ptr);
+                break;
+            case pipe:
+                close_pipe(pipes_ptr, inode);
+                break;
+            case file:
+                break;
+            default:
+                break;
+        }
+    }
+    return 0;
+}
+
 void __exit(ctx_t* ctx, int destroy, pid_t pid){
   pcb_t* temp = find_pid_ht(ht_ptr, pid);
   if(!temp->ph.parent)
-      temp->ph.parent = find_pid_ht(ht_ptr,1);
+      add_child(find_pid_ht(ht_ptr, 1), temp);
   if(pid == 1 || temp->ph.parent->pid < 1) //Do not exit the shell
     return;
   //deschedule(pid); finally here's the bug!!!
@@ -60,6 +87,10 @@ void __exit(ctx_t* ctx, int destroy, pid_t pid){
   }
   __ioctl(pid, parent->pid);
   if(destroy){
+    for(int i=0;i<MAXFD;i++){
+        if(temp->fdtable.fd[i].active)
+            __close(temp, i);
+    }
     destroy_pid(pid);
   }
   else {
@@ -73,7 +104,7 @@ int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int fla
         return -1;
     if(fd>=0 && p->fdtable.fd[fd].active)
         return -1;
-    int fd2 = getFileDes(p, fd);
+    int fd2 = getFileDes(p, fd);//this is the return value
     if(fd2<0)
         return -1;
     switch(type){
@@ -116,7 +147,7 @@ int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int fla
             return -1;
             break;
     }
-    return 0;
+    return fd2;
 }
 
 void process_char_stdout(uint8_t c){
@@ -174,6 +205,8 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   programs[2].entry = (uint32_t)entry_P2;
   programs[3].name  = "genPrimes";
   programs[3].entry = (uint32_t)entry_genPrimes;
+  programs[4].name  = "testPipe";
+  programs[4].entry = (uint32_t)entry_testPipe;
 
   initialise_scheduler((uint32_t)&tos_irq);
   
@@ -260,12 +293,12 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       int   fd = ( int   )( ctx->gpr[ 0 ] );
       fd_entry* fentry = &current->fdtable.fd[fd];
       if(!fentry->active || fentry->flags == READ_ONLY){
-        ctx->gpr[0] = -1;
+        ctx->gpr[3] = -1;
         break;
       }
       global_entry* gentry = &filetable_ptr->entries[fentry->globalID];
       if(!gentry->active){
-        ctx->gpr[0] = -1;
+        ctx->gpr[3] = -1;
         break;
       }
       switch(gentry->type){
@@ -281,17 +314,50 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           for( int i = 0; i < n; i++ ) {
             PL011_putc( UART0, *x++ );
           }
-          ctx->gpr[ 0 ] = n;
+          ctx->gpr[ 3 ] = n;
           break;
         }
         case pipe : {
+          //pipes accept int array instead of char
+          //n is the number of integers, not bytes.
+          int* x = (int*)(ctx->gpr[1]);
+          int  n = (int )(ctx->gpr[2]);
+          pipe_t* pentry = &pipes_ptr->p[gentry->inode];
+          if(!pentry->active){
+            ctx->gpr[3] = -1;
+            break;
+          }
+          int i;
+          for(i=0;i<n;i++){
+            if(isPipeFull(pipes_ptr, pentry->inode)){
+              ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
+              current->proc_state = BLOCKED;
+              ctx->gpr[1] = ctx->gpr[1] + i*sizeof(int);
+              ctx->gpr[2] = ctx->gpr[2] - i;
+              pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1);
+              enqueue_wq(filetable_ptr, gentry->globalID, 0, current->pid);
+              if(unblock_next>0)
+                unblock_by_pid(unblock_next);
+              scheduler(ctx);
+              break;
+            }
+            else {
+              send_pipe(pipes_ptr, pentry->inode, x[i]);
+              ctx->gpr[3] = ctx->gpr[3] + 1;
+            }
+          }
+          pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1); //is anyone available to read what I've just written?
+          if(unblock_next<=0)
+            unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0); //if not, is anyone available to write?
+          if(unblock_next>0)
+            unblock_by_pid(unblock_next);  
           break;
         }
         case file : {
           break;
         }
         default : {
-          ctx->gpr[0] = -1;
+          ctx->gpr[3] = -1;
           break;
         }
       }
@@ -303,7 +369,12 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       ctx->gpr[0] = child;
       pcb_t* childPCB = find_pid_ht(ht_ptr, child);
       childPCB->ctx.gpr[0] = 0;
-      //__ioctl(current->pid,childPCB->pid);
+      for(int i=0;i<MAXFD;i++){
+        if(childPCB->fdtable.fd[i].active){
+            int globalID = childPCB->fdtable.fd[i].globalID;
+            filetable_ptr->entries[globalID].refcount++;
+        }
+      }
       schedule(child);
       break;
     }
@@ -315,12 +386,12 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       int fd = (int)(ctx->gpr[0]);
       fd_entry* fentry = &current->fdtable.fd[fd];
       if(!fentry->active || fentry->flags == WRITE_ONLY){
-        ctx->gpr[0] = -1;
+        ctx->gpr[3] = -1;
         break;
       }
       global_entry* gentry = &filetable_ptr->entries[fentry->globalID];
       if(!gentry->active){
-        ctx->gpr[0] = -1;
+        ctx->gpr[3] = -1;
         break;
       }
       switch(gentry->type){
@@ -346,17 +417,52 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
               break;
             }
           }
-          ctx->gpr[0] = i;
+          ctx->gpr[3] = i;
           break;
         }
         case pipe : {
+          //pipes accept int array instead of char
+          //n is the number of integers, not bytes.
+          //reading from pipe should block until
+          //all n integers are received
+          int* x = (int*)(ctx->gpr[1]);
+          int  n = (int )(ctx->gpr[2]);
+          pipe_t* pentry = &pipes_ptr->p[gentry->inode];
+          if(!pentry->active){
+            ctx->gpr[3] = -1;
+            break;
+          }
+          int i;
+          for(i=0;i<n;i++){
+            if(isPipeEmpty(pipes_ptr, pentry->inode)){
+              ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
+              current->proc_state = BLOCKED;
+              ctx->gpr[1] = ctx->gpr[1] + i*sizeof(int);
+              ctx->gpr[2] = ctx->gpr[2] - i;
+              pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0);
+              enqueue_wq(filetable_ptr, gentry->globalID, 1, current->pid);
+              if(unblock_next>0)
+                unblock_by_pid(unblock_next);
+              scheduler(ctx);
+              break;
+            }
+            else {
+              x[i] = consume_pipe(pipes_ptr, pentry->inode);
+              ctx->gpr[3] = ctx->gpr[3] + 1;
+            }
+          }
+          pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1); //is anyone available to read some more?
+          if(unblock_next<=0)
+            unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0); //if not, is anyone available to write?
+          if(unblock_next>0)
+            unblock_by_pid(unblock_next);         
           break;
         }
         case file : {
           break;
         }
         default : {
-          ctx->gpr[0] = -1;
+          ctx->gpr[3] = -1;
           break;
         }
       }
@@ -419,7 +525,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x07 : { //int pids=procs(int* buff)
       int* buff = (int*) ctx->gpr[0];
-      pidkey_t* temp = ht_ptr->keyset.head;
+      pcb_t* temp = ht_ptr->keyset.head;
       int i = 0;
       while(temp){
         buff[i++] = temp->pid;
@@ -470,6 +576,11 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       if(!p)
         break;
       setPriority(p, priority);
+      break;
+    }
+    case 0x0B : { //int getpipe()
+      int fd =  __open(current, -1, -1, pipe, -1, READ_WRITE);
+      ctx->gpr[0] = fd;
       break;
     }
     default   : { // unknown
