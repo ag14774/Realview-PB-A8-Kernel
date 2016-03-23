@@ -172,8 +172,12 @@ void normalise_vruntimes(){
     int i;
     if(q.min_vruntime<NORM_THRES)
         return;
-    for(i=0;i<q.processes;i++){
-        q.pcbs[i]->vruntime = q.pcbs[i]->vruntime - q.min_vruntime;
+    pcb_t* temp = ht.keyset.head;
+    while(temp){
+        temp->vruntime = temp->vruntime - q.min_vruntime;
+        if(temp->vruntime<0)
+            temp->vruntime = 0;
+        temp = temp->next;
     }
     q.min_vruntime = 0;
 }
