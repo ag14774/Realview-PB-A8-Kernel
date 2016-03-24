@@ -52,7 +52,7 @@ void enqueue_wq(global_table* t, int globalID, int queue, int pid){
     wq->len++;
 }
 
-int dequeue_wq(global_table* t, int queue, int globalID){ //return 0 if empty;
+int dequeue_wq(global_table* t, int globalID, int queue){ //return 0 if empty;
     if(!t->entries[globalID].active)
         return 0;
     wait_queue* wq;

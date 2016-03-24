@@ -47,14 +47,14 @@ char *trimwhitespace(char *str){
     char *end;
 
     // Trim leading space
-    while(isspace(*str)) str++;
+    while(isspace(*str)||*str=='|') str++;
 
     if(*str == 0)  // All spaces?
         return str;
 
     //Trim trailing space
     end = str + strlen(str) - 1;
-    while(end > str && isspace(*end)) end--;
+    while(end > str && (isspace(*end)||*end=='|')) end--;
 
     // Write new null terminator
     *(end+1) = 0;
@@ -68,7 +68,14 @@ void parse_command(char* line, char** argbuff){
     int j = 0;
     argbuff[j++] = line;
     for(i = 0;i<len;i++){
-        if(line[i]==' '){
+        if(line[i]=='|'){
+            line[i] = '\0';
+            if(line[i+1]!='\0'){
+                argbuff[j++] = (char*)3; //signal to detect end of first command
+                argbuff[j++] = &line[i+1];
+            }
+        }
+        else if(line[i]==' '){
             line[i] = '\0';
             if(line[i+1]!='\0')
                 argbuff[j++] = &line[i+1];
@@ -218,10 +225,66 @@ void shell() {
                     //printF("Not Implemented\n");
                     break;
                 }
-            default:
-                if(first_letter)
-                    printF("Command not recognised\n");
+            default: {
+                int i = 0;
+                int j = 0;
+                int firstpid = 0;
+                int prevpipe = -1;
+                while(1){
+                    if(argbuff[i] == (char*)3){
+                        argbuff[i] = (char*)0;
+                        int pipe = getpipe();
+                        fcntl(pipe, READ_WRITE|CLOSE_ON_EXEC);
+                        int pid = fork();
+                        if(pid == 0){
+                            redir(1, pipe);
+                            if(prevpipe >= 0)
+                                redir(0, prevpipe); 
+                            int success = exec(argbuff[j], &argbuff[j]);
+                            if(success<0){
+                                printF("Command not recognised\n");
+                                exit();
+                            }
+                        }
+                        else{
+                            if(prevpipe>=0)
+                                close(prevpipe);
+                            prevpipe = pipe;
+                            if(j == 0)
+                                firstpid = pid;
+                            if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
+                                update_table();
+                            add_proc(pid, argbuff[j]);
+                            j = i + 1;
+                        }
+                    }
+                    else if(argbuff[i] == (char*)0){
+                        int pid = fork();
+                        if(pid == 0){
+                            if(prevpipe>=0)
+                                redir(0, prevpipe);
+                            int success = exec(argbuff[j], &argbuff[j]);
+                            if(success<0){
+                                printF("Command not recognised\n");
+                                exit();
+                            }
+                        }
+                        else{
+                            if(prevpipe>=0)
+                                close(prevpipe);
+                            if(j == 0)
+                                firstpid = pid;
+                            if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
+                                update_table();
+                            add_proc(pid, argbuff[j]);
+                            waitpid(firstpid);
+                        }
+                        break;
+                    }
+                    i++;
+                }
                 break;
+            }
         }
     }
 

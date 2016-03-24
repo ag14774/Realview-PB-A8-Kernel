@@ -207,13 +207,15 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   programs[3].entry = (uint32_t)entry_genPrimes;
   programs[4].name  = "testPipe";
   programs[4].entry = (uint32_t)entry_testPipe;
+  programs[5].name  = "P3";
+  programs[5].entry = (uint32_t)entry_P3;
 
   initialise_scheduler((uint32_t)&tos_irq);
   
   pid_t temp = init_pcb((uint32_t)entry_shell);
   pcb_t* p = find_pid_ht(ht_ptr, temp);
-  __open(p, 0, -1, stdio, -1, READ_ONLY);
-  __open(p, 1, -1, stdio, -1, WRITE_ONLY);
+  __open(p, 0, -1, stdio, -1, READ_ONLY|KEEP_ON_EXEC);
+  __open(p, 1, -1, stdio, -1, WRITE_ONLY|KEEP_ON_EXEC);
   schedule(temp);
 
   //temp = init_pcb((uint32_t)entry_P0);
@@ -292,7 +294,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     case 0x01 : { // write( fd, x, n )
       int   fd = ( int   )( ctx->gpr[ 0 ] );
       fd_entry* fentry = &current->fdtable.fd[fd];
-      if(!fentry->active || fentry->flags == READ_ONLY){
+      if(!fentry->active || (fentry->flags & 0xf) == READ_ONLY){
         ctx->gpr[3] = -1;
         break;
       }
@@ -346,6 +348,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
               ctx->gpr[3] = ctx->gpr[3] + 1;
             }
           }
+          if(i!=n)
+            break;
           pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1); //is anyone available to read what I've just written?
           if(unblock_next<=0)
             unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0); //if not, is anyone available to write?
@@ -385,7 +389,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     case 0x04 : { //read(fd, x, n)
       int fd = (int)(ctx->gpr[0]);
       fd_entry* fentry = &current->fdtable.fd[fd];
-      if(!fentry->active || fentry->flags == WRITE_ONLY){
+      if(!fentry->active || (fentry->flags & 0xf) == WRITE_ONLY){
         ctx->gpr[3] = -1;
         break;
       }
@@ -451,6 +455,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
               ctx->gpr[3] = ctx->gpr[3] + 1;
             }
           }
+          if(i!=n)
+            break;
           pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1); //is anyone available to read some more?
           if(unblock_next<=0)
             unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0); //if not, is anyone available to write?
@@ -520,6 +526,13 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       ctx->lr = (uint32_t)&__user_exit;
       ctx->gpr[0] = i;
       ctx->gpr[1] = ctx->sp;
+      for(int i=0;i<MAXFD;i++){
+        if(current->fdtable.fd[i].active){
+            if((current->fdtable.fd[i].flags & 0xf0) == CLOSE_ON_EXEC){
+                __close(current, i);
+            }
+        }
+      }
       update_ctx(current, ctx);
       break;
     }
@@ -579,8 +592,38 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       break;
     }
     case 0x0B : { //int getpipe()
-      int fd =  __open(current, -1, -1, pipe, -1, READ_WRITE);
+      int fd =  __open(current, -1, -1, pipe, -1, READ_WRITE|KEEP_ON_EXEC);
       ctx->gpr[0] = fd;
+      break;
+    }
+    case 0x0C : { //int fcntl(fd, flags)
+      int fd    = (int) ctx->gpr[0];
+      int flags = (int) ctx->gpr[1];
+      if(!current->fdtable.fd[fd].active){
+          ctx->gpr[0] = -1;
+          break;
+      }
+      current->fdtable.fd[fd].flags = flags;
+      ctx->gpr[0] = 0;
+      break;
+    }
+    case 0x0D : { //int redir(from, to) "to" must be open. original from will close
+      int from = (int) ctx->gpr[0];
+      int to   = (int) ctx->gpr[1];
+      if(!current->fdtable.fd[to].active){
+          ctx->gpr[0] = -1;
+          break;
+      }
+      __close(current, from);
+      int globalID   = current->fdtable.fd[to].globalID;
+      file_type type = filetable_ptr->entries[globalID].type;
+      __open(current, from, globalID, type, -1, READ_WRITE|KEEP_ON_EXEC);
+      ctx->gpr[0] = 0;
+      break;
+    }
+    case 0x0E : { //close(fd)
+      int fd = (int) ctx->gpr[0];
+      __close(current, fd);
       break;
     }
     default   : { // unknown

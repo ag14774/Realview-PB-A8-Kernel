@@ -9,6 +9,13 @@
 #define SIGCONT 0xA0
 #define SIGTERM 0xA1
 
+#define READ_ONLY 0x01
+#define WRITE_ONLY 0x02
+#define READ_WRITE 0x03
+//you can bitwise OR those together
+#define CLOSE_ON_EXEC 0x10
+#define KEEP_ON_EXEC  0x00
+
 // cooperatively yield control of processor, i.e., invoke the scheduler
 void yield();
 
@@ -48,5 +55,11 @@ void kill(int pid, int signal);
 void nice(int pid, int priority);
 
 int getpipe();
+
+int fcntl(int fd, int flags);
+
+int redir(int from, int to);
+
+void close(int fd);
 
 #endif

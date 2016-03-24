@@ -128,6 +128,7 @@ void setFileDes(pcb_t* pcb, int fd, int globalID, int flags, int rwpointer){
 
 int  closeFileDes(pcb_t* pcb, int fd){ //returns globalID to be used to decrease globalID count.
     pcb->fdtable.fd[fd].active = 0;
+    pcb->fdtable.count--;
     return pcb->fdtable.fd[fd].globalID;
 }
 

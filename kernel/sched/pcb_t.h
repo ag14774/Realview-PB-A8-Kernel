@@ -11,9 +11,12 @@
 
 #define MAXFD 15
 
-#define READ_ONLY 0xF1
-#define WRITE_ONLY 0xF2
-#define READ_WRITE 0xF3
+#define READ_ONLY 0x01
+#define WRITE_ONLY 0x02
+#define READ_WRITE 0x03
+
+#define CLOSE_ON_EXEC 0x10
+#define KEEP_ON_EXEC  0x00
 
 /* The kernel source code is made simpler by three type definitions:
  *

@@ -132,6 +132,42 @@ int getpipe(){
     return r;
 }
 
+int fcntl(int fd, int flags){
+    int r;
+
+    asm volatile( "mov r0, %1 \n"
+                  "mov r1, %2 \n"
+                  "svc #12    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (fd), "r" (flags)
+                : "r0", "r1" );
+    
+    return r;
+}
+
+int redir(int from, int to){
+    int r;
+
+    asm volatile( "mov r0, %1 \n"
+                  "mov r1, %2 \n"
+                  "svc #13    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (from), "r" (to)
+                : "r0", "r1" );
+
+    return r;
+}
+
+void close(int fd){
+    asm volatile( "mov r0, %0 \n"
+                  "svc #14    \n"
+                :
+                : "r" (fd)
+                : "r0" );
+}
+
 int read_line(char b[], size_t array_size){
   int chars = 0;
   if(array_size > 500)
