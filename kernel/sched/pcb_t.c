@@ -23,6 +23,12 @@ void restore_ctx(ctx_t *ctx, pcb_t *pcb){
     memcpy(ctx, &pcb->ctx, sizeof(ctx_t));
 }
 
+void setBlockInfo(pcb_t* pcb, proc_state_t proc_state, int fd, int operation){
+    pcb->proc_state = proc_state;
+    pcb->block_info.fd = fd;
+    pcb->block_info.operation = operation;
+}
+
 void add_child(pcb_t* parent, pcb_t* child){
     proc_hierarchy* parentph = &parent->ph;
     proc_hierarchy* childph = &child->ph;

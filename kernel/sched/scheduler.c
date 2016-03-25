@@ -17,6 +17,23 @@ global_table* filetable_ptr;
 
 void unblock_by_pid(pid_t pid){
     pcb_t* p = find_pid_ht(&ht, pid);
+    if(p->proc_state == BLOCKED){
+        int operation  = p->block_info.operation;
+        int globalID   = p->fdtable.fd[p->block_info.fd].globalID;
+        file_type type = filetable_ptr->entries[globalID].type;
+        switch(type){
+            case stdio: //nothing to do here
+                break;
+            case pipe:
+                remove_wq(filetable_ptr, globalID, operation, pid);
+                break;
+            case file:
+                break;
+            default:
+                break;
+        }
+        p->proc_state = WAITING;
+    }
     if(p->queue_index!=-1){
         p->proc_state = READY;
         return;

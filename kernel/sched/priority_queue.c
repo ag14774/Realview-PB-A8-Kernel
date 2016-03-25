@@ -9,6 +9,8 @@ void insert(queue_t* q, pcb_t* p){
     if(q->alloc_size <= q->processes){
         //handle reallocation here
     }
+    if(p->proc_state==BLOCKED) //this should be reset before trying to insert
+        return;
     int i = q->processes;//next empty position
     int j = (i-1)/2;//get parent
     while(i>0 && q->pcbs[j]->vruntime > p->vruntime){

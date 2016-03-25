@@ -15,6 +15,8 @@ typedef struct {
 
 proc_table_t proc_table;
 
+char current_cmd[50];
+
 void add_proc(int pid, char* name){
     int index;
     if(proc_table.freeJobIDpointer >= 0){
@@ -65,6 +67,8 @@ char *trimwhitespace(char *str){
 void parse_command(char* line, char** argbuff){
     int i = 0;
     int len = strlen(line);
+    memcpy(current_cmd,line,len+1);
+    line = current_cmd;
     int j = 0;
     argbuff[j++] = line;
     for(i = 0;i<len;i++){
@@ -72,12 +76,16 @@ void parse_command(char* line, char** argbuff){
             line[i] = '\0';
             if(line[i+1]!='\0'){
                 argbuff[j++] = (char*)3; //signal to detect end of first command
+            }
+            for(i=i;i<len && (line[i+1]==' '||line[i+1]=='|');i++);
+            if(i!=len && line[i+1]!='\0'){
                 argbuff[j++] = &line[i+1];
             }
         }
         else if(line[i]==' '){
             line[i] = '\0';
-            if(line[i+1]!='\0')
+            for(i=i;i<len && line[i+1]==' ';i++);
+            if(line[i+1]!='\0' && line[i+1]!='|')
                 argbuff[j++] = &line[i+1];
         }
     }
@@ -178,20 +186,61 @@ void shell() {
                 }
             case 'e':
                 if(strcmp(cmd,cmd_list[1]) == 0){
-                    int pid = fork();
-                    char** argv = &argbuff[1];
-                    if(pid==0){
-                        int success = exec(argbuff[1], argv);
-                        if(success<0)
-                            exit();
+                    int i = 1;
+                    int j = 1;
+                    int firstpid = 0;
+                    int prevpipe = -1;
+                    while(1){
+                        if(argbuff[i] == (char*)3){
+                            argbuff[i] = (char*)0;
+                            int pipe = getpipe();
+                            fcntl(pipe, READ_WRITE|CLOSE_ON_EXEC);
+                            int pid = fork();
+                            if(pid == 0){
+                                redir(1, pipe);
+                                if(prevpipe >= 0)
+                                    redir(0, prevpipe); 
+                                int success = exec(argbuff[j], &argbuff[j]);
+                                if(success<0){
+                                    exit();
+                                }
+                            }
+                            else{
+                                if(prevpipe>=0)
+                                    close(prevpipe);
+                                prevpipe = pipe;
+                                if(j == 1)
+                                    firstpid = pid;
+                                if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
+                                    update_table();
+                                add_proc(pid, argbuff[j]);
+                                j = i + 1;
+                            }
+                        }
+                        else if(argbuff[i] == (char*)0){
+                            int pid = fork();
+                            if(pid == 0){
+                                if(prevpipe>=0)
+                                    redir(0, prevpipe);
+                                int success = exec(argbuff[j], &argbuff[j]);
+                                if(success<0){
+                                    exit();
+                                }
+                            }
+                            else{
+                                if(prevpipe>=0)
+                                    close(prevpipe);
+                                if(j == 1)
+                                    firstpid = pid;
+                                if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
+                                    update_table();
+                                add_proc(pid, argbuff[j]);
+                                waitpid(firstpid);
+                            }
+                            break;
+                        }
+                        i++;
                     }
-                    else{
-                        if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
-                            update_table();
-                        add_proc(pid, argbuff[1]);
-                        waitpid(pid);
-                    }
-                    //printF("Not Implemented\n");
                     break;
                 }
             case 'f':
@@ -226,64 +275,8 @@ void shell() {
                     break;
                 }
             default: {
-                int i = 0;
-                int j = 0;
-                int firstpid = 0;
-                int prevpipe = -1;
-                while(1){
-                    if(argbuff[i] == (char*)3){
-                        argbuff[i] = (char*)0;
-                        int pipe = getpipe();
-                        fcntl(pipe, READ_WRITE|CLOSE_ON_EXEC);
-                        int pid = fork();
-                        if(pid == 0){
-                            redir(1, pipe);
-                            if(prevpipe >= 0)
-                                redir(0, prevpipe); 
-                            int success = exec(argbuff[j], &argbuff[j]);
-                            if(success<0){
-                                printF("Command not recognised\n");
-                                exit();
-                            }
-                        }
-                        else{
-                            if(prevpipe>=0)
-                                close(prevpipe);
-                            prevpipe = pipe;
-                            if(j == 0)
-                                firstpid = pid;
-                            if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
-                                update_table();
-                            add_proc(pid, argbuff[j]);
-                            j = i + 1;
-                        }
-                    }
-                    else if(argbuff[i] == (char*)0){
-                        int pid = fork();
-                        if(pid == 0){
-                            if(prevpipe>=0)
-                                redir(0, prevpipe);
-                            int success = exec(argbuff[j], &argbuff[j]);
-                            if(success<0){
-                                printF("Command not recognised\n");
-                                exit();
-                            }
-                        }
-                        else{
-                            if(prevpipe>=0)
-                                close(prevpipe);
-                            if(j == 0)
-                                firstpid = pid;
-                            if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
-                                update_table();
-                            add_proc(pid, argbuff[j]);
-                            waitpid(firstpid);
-                        }
-                        break;
-                    }
-                    i++;
-                }
-                break;
+                if(first_letter)
+                    printF("Command not recognised\n");
             }
         }
     }

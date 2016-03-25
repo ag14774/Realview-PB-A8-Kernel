@@ -46,19 +46,23 @@ void __ioctl(pid_t from, pid_t to){
 int __close(pcb_t* p, int fd){
     if(!p->fdtable.fd[fd].active)
         return -1;
+    int close_on_exit = p->fdtable.fd[fd].flags & 0xf00;
     int globalID = closeFileDes(p, fd);
     if(!filetable_ptr->entries[globalID].active)
         return -1;
     filetable_ptr->entries[globalID].refcount--;
-    if(filetable_ptr->entries[globalID].refcount == 0){
+    if(filetable_ptr->entries[globalID].refcount == 0 && close_on_exit == CLOSE_ON_EXIT){
         int inode = filetable_ptr->entries[globalID].inode;
         file_type type = filetable_ptr->entries[globalID].type;
-        close_global_entry(filetable_ptr, globalID);
         switch(type){
             case stdio:
+                close_global_entry(filetable_ptr, globalID);
                 flush_buff(ib_ptr);
                 break;
             case pipe:
+                if(pipes_ptr->p[inode].len>0)
+                    break;
+                close_global_entry(filetable_ptr, globalID);
                 close_pipe(pipes_ptr, inode);
                 break;
             case file:
@@ -94,7 +98,7 @@ void __exit(ctx_t* ctx, int destroy, pid_t pid){
     destroy_pid(pid);
   }
   else {
-    temp->proc_state = WAITING;
+    setBlockInfo(temp, WAITING, -1, -1);
   }
   scheduler( ctx );
 }
@@ -320,9 +324,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           break;
         }
         case pipe : {
-          //pipes accept int array instead of char
-          //n is the number of integers, not bytes.
-          int* x = (int*)(ctx->gpr[1]);
+          char* x = (char*)(ctx->gpr[1]);
           int  n = (int )(ctx->gpr[2]);
           pipe_t* pentry = &pipes_ptr->p[gentry->inode];
           if(!pentry->active){
@@ -333,12 +335,12 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           for(i=0;i<n;i++){
             if(isPipeFull(pipes_ptr, pentry->inode)){
               ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
-              current->proc_state = BLOCKED;
               ctx->gpr[1] = ctx->gpr[1] + i*sizeof(int);
               ctx->gpr[2] = ctx->gpr[2] - i;
               pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1);
+              setBlockInfo(current, BLOCKED, fd, 0);
               enqueue_wq(filetable_ptr, gentry->globalID, 0, current->pid);
-              if(unblock_next>0)
+              if(unblock_next>0 && unblock_next!=current->pid)
                 unblock_by_pid(unblock_next);
               scheduler(ctx);
               break;
@@ -353,7 +355,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1); //is anyone available to read what I've just written?
           if(unblock_next<=0)
             unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0); //if not, is anyone available to write?
-          if(unblock_next>0)
+          if(unblock_next>0 && unblock_next!=current->pid)
             unblock_by_pid(unblock_next);  
           break;
         }
@@ -409,7 +411,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           if(ib_ptr->pid != current->pid || !ib_ptr->ready){
             __ioctl(0, current->pid); //if nobody has ownership then give ownership
             ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
-            current->proc_state = BLOCKED;
+            setBlockInfo(current, BLOCKED, fd, -1);
             scheduler(ctx);
             break;
           }
@@ -425,11 +427,9 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           break;
         }
         case pipe : {
-          //pipes accept int array instead of char
-          //n is the number of integers, not bytes.
           //reading from pipe should block until
-          //all n integers are received
-          int* x = (int*)(ctx->gpr[1]);
+          //all n bytes are received
+          char* x = (char*)(ctx->gpr[1]);
           int  n = (int )(ctx->gpr[2]);
           pipe_t* pentry = &pipes_ptr->p[gentry->inode];
           if(!pentry->active){
@@ -440,12 +440,12 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           for(i=0;i<n;i++){
             if(isPipeEmpty(pipes_ptr, pentry->inode)){
               ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
-              current->proc_state = BLOCKED;
               ctx->gpr[1] = ctx->gpr[1] + i*sizeof(int);
               ctx->gpr[2] = ctx->gpr[2] - i;
               pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0);
+              setBlockInfo(current, BLOCKED, fd, 1);
               enqueue_wq(filetable_ptr, gentry->globalID, 1, current->pid);
-              if(unblock_next>0)
+              if(unblock_next>0 && unblock_next!=current->pid)
                 unblock_by_pid(unblock_next);
               scheduler(ctx);
               break;
@@ -460,7 +460,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1); //is anyone available to read some more?
           if(unblock_next<=0)
             unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0); //if not, is anyone available to write?
-          if(unblock_next>0)
+          if(unblock_next>0 && unblock_next!=current->pid)
             unblock_by_pid(unblock_next);         
           break;
         }
@@ -486,7 +486,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
         reason = WAITING;
         unblock_by_pid(pid);//if it is blocked
       }
-      current->proc_state = reason;
+      setBlockInfo(current, reason, 0, 0);
       scheduler( ctx );
       break;
     }
@@ -497,7 +497,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
 
       uint32_t pc = find_entry(pn);
       if(pc==-1){
-          ctx->gpr[0] = -1;
+          ctx->gpr[0] = -2;
           break;
       }
 

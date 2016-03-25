@@ -9,12 +9,15 @@
 #define SIGCONT 0xA0
 #define SIGTERM 0xA1
 
-#define READ_ONLY 0x01
-#define WRITE_ONLY 0x02
-#define READ_WRITE 0x03
+#define READ_ONLY 0x001
+#define WRITE_ONLY 0x002
+#define READ_WRITE 0x003
 //you can bitwise OR those together
-#define CLOSE_ON_EXEC 0x10
-#define KEEP_ON_EXEC  0x00
+#define CLOSE_ON_EXEC 0x010
+#define KEEP_ON_EXEC  0x000
+//you can bitwise OR those together
+#define KEEP_ON_EXIT  0x100
+#define CLOSE_ON_EXIT 0x000
 
 // cooperatively yield control of processor, i.e., invoke the scheduler
 void yield();

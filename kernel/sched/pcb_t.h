@@ -11,12 +11,15 @@
 
 #define MAXFD 15
 
-#define READ_ONLY 0x01
-#define WRITE_ONLY 0x02
-#define READ_WRITE 0x03
+#define READ_ONLY 0x001
+#define WRITE_ONLY 0x002
+#define READ_WRITE 0x003
 
-#define CLOSE_ON_EXEC 0x10
-#define KEEP_ON_EXEC  0x00
+#define CLOSE_ON_EXEC 0x010
+#define KEEP_ON_EXEC  0x000
+
+#define KEEP_ON_EXIT  0x100
+#define CLOSE_ON_EXIT 0x000
 
 /* The kernel source code is made simpler by three type definitions:
  *
@@ -72,12 +75,18 @@ typedef struct stack_info {
   uint32_t size;
 } stack_info;
 
+typedef struct{
+    int fd;
+    int operation; //0 write, 1 read
+} block_info_t;
+
 typedef struct pcb_t {
   pid_t pid;
   ctx_t ctx;
   proc_hierarchy ph;
   stack_info stack;
   proc_state_t proc_state;
+  block_info_t block_info;
   fdtable_t fdtable;
   uint8_t priority; //1(highest)-20
   uint32_t vruntime; //vruntime = vruntime + priority
@@ -92,6 +101,7 @@ void update_runtime(pcb_t *pcb);
 void setPriority(pcb_t *pcb, uint8_t priority);
 void update_ctx(pcb_t *pcb, ctx_t *ctx);
 void restore_ctx(ctx_t *ctx, pcb_t *pcb);
+void setBlockInfo(pcb_t* pcb, proc_state_t proc_state, int fd, int operation);
 
 void add_child(pcb_t* parent, pcb_t* child);
 void remove_child(pcb_t* child);

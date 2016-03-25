@@ -68,6 +68,29 @@ int dequeue_wq(global_table* t, int globalID, int queue){ //return 0 if empty;
     return pid;
 }
 
+void remove_wq(global_table* t, int globalID, int queue, int pid){
+    if(!t->entries[globalID].active)
+        return;
+    if(queue < 0)
+        return;
+    wait_queue* wq;
+    if(queue == 0)
+        wq = &t->entries[globalID].wqwrite;
+    else
+        wq = &t->entries[globalID].wqread;
+    if(wq->len == 0)
+        return;
+    int len = wq->len;
+    int temp = -1;
+    int i=0;
+    while(temp!=pid && i<len){
+        i++;
+        temp = dequeue_wq(t, globalID, queue);
+        if(temp!=pid)
+            enqueue_wq(t, globalID, queue, temp);
+    }
+}
+
 int close_global_entry(global_table* t, int globalID){ //close pipe or file first
     if(t->entries[globalID].refcount>0)
         return -1;
@@ -113,7 +136,7 @@ void setPipe(pipes_t* pipes, i_node inode, int globalID){
     pipes->p[inode].globalID = globalID;
 }
 
-void send_pipe(pipes_t* pipes, i_node inode, int n){
+void send_pipe(pipes_t* pipes, i_node inode, char n){
     if(!pipes->p[inode].active)
         return;
     //if(isPipeFull(pipes, inode))
@@ -124,13 +147,13 @@ void send_pipe(pipes_t* pipes, i_node inode, int n){
     p->len++;
 }
 
-int consume_pipe(pipes_t* pipes, i_node inode){
+char consume_pipe(pipes_t* pipes, i_node inode){
     if(!pipes->p[inode].active)
         return 0;
     //if(isPipeEmpty(pipes, inode))
     //    return 1;
     pipe_t* p = &pipes->p[inode];
-    int n = p->buff[p->readptr];
+    char n = p->buff[p->readptr];
     p->readptr = (p->readptr + 1) % PIPESIZE;
     p->len--;
     return n;
