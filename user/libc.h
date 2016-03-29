@@ -30,7 +30,7 @@ int read( int fd, void* x, size_t n );
 
 int fork();
 
-void exit();
+void exit(int status);
 
 int exec(const char *path, char *const argv[]);
 
@@ -64,5 +64,7 @@ int fcntl(int fd, int flags);
 int redir(int from, int to);
 
 void close(int fd);
+
+int getppid(int pid);
 
 #endif

@@ -1,48 +1,50 @@
 #include "shell.h"
 
+#define HT_SIZE 50
+#define HT_BUCKET 4
+
 typedef struct {
-    int jobnumber;
     int pid;
     char name[30];
-} proc_t;
+} hashentry_t;
 
-typedef struct {
-    proc_t proc[50];
-    int freeJobID[50];
-    int freeJobIDpointer;
-    int nextJobID;
-} proc_table_t;
-
-proc_table_t proc_table;
+hashentry_t ht[HT_SIZE][HT_BUCKET];
 
 char current_cmd[50];
 
+uint32_t hash_pid(int pid){
+    return ((uint32_t)(282563095*pid+29634029) % 993683819) % HT_SIZE ; //best so far
+}
+
+int isStillAlive(int pid){
+    int stat = procstat(pid);
+    if(!stat)
+        return 0;
+    else
+        return 1;
+}
+
+hashentry_t* find_proc(int pid){
+    uint32_t index = hash_pid(pid);
+    uint32_t j = 0;
+    while(j<HT_BUCKET){
+        if(ht[index][j].pid == pid)
+            return &ht[index][j];
+        j = j + 1;
+    }
+    return NULL;
+}
+
 void add_proc(int pid, char* name){
-    int index;
-    if(proc_table.freeJobIDpointer >= 0){
-        index = proc_table.freeJobID[proc_table.freeJobIDpointer--];
+    uint32_t index = hash_pid(pid);
+    uint32_t j = 0;
+    while(ht[index][j].pid != 0 && isStillAlive(ht[index][j].pid) && j<HT_BUCKET){
+        j = j + 1;
     }
-    else {
-        index = proc_table.nextJobID++;
-    }
-    proc_table.proc[index].jobnumber = index;
-    proc_table.proc[index].pid = pid;
-    memcpy(proc_table.proc[index].name, name, 30);
-}
-
-void remove_proc(int jobID){
-    proc_table.proc[jobID].jobnumber = -1;
-    proc_table.freeJobID[++proc_table.freeJobIDpointer] = jobID;
-}
-
-void update_table(){
-    for(int i = 0;i<proc_table.nextJobID;i++){
-        if(i == proc_table.proc[i].jobnumber){ //a process is valid only if the index matches the jobnumber
-            int stat = procstat(proc_table.proc[i].pid);
-            if(stat<0)
-                remove_proc(i);
-        }
-    }
+    if(j==HT_BUCKET)
+        return;
+    ht[index][j].pid = pid;
+    memcpy(ht[index][j].name, name, 30);
 }
 
 char *trimwhitespace(char *str){
@@ -119,36 +121,57 @@ void help(){
 }
 
 void ps(){
-    printF("\nJOB\tNAME\tSTATE\n");
-    for(int i = 0;i<proc_table.nextJobID;i++){
-        if(i == proc_table.proc[i].jobnumber){ //a process is valid only if the index matches the jobnumber
-            int stat = procstat(proc_table.proc[i].pid);
-            if(stat<0)
-                remove_proc(i);
-            switch(stat){
-            case 0:
-            case 1:
-                printF("%d\t%s\t%s\n",i,proc_table.proc[i].name, "RUNNING");
+    int pids[50];
+    char* shellname = "shell";
+    int num = procs(pids);
+    printF("\nJOB\tNAME\t\tSTATE\n");
+    for(int i = 0;i<num;i++){
+        if(pids[i]==1)
+            continue;
+        int stat = procstat(pids[i]);
+        hashentry_t* hentry = find_proc(pids[i]);
+        int parpid = pids[i];
+        char* name;
+        while(!hentry){
+            parpid = getppid(parpid);
+            if(parpid <= 1)
                 break;
-            case 2:
-                printF("%d\t%s\t%s\n",i,proc_table.proc[i].name, "BLOCKED");
-                break;
-            case 3:
-                printF("%d\t%s\t%s\n",i,proc_table.proc[i].name, "STOPPED");
-                break;
-            default:
-                break;
-            }
+            hentry = find_proc(parpid);
+        }
+        if(parpid<=1){
+            name = shellname;
+        }
+        else{
+            name = hentry->name;
+        }
+        switch(stat){
+        case 0:
+        case 1:
+            if(parpid == pids[i])
+                printF("%d\t%s\t\t%s\n",pids[i],name, "RUNNING");
+            else
+                printF("%d\t%s%s\t\t%s\n",pids[i],name,"_child", "RUNNING");
+            break;
+        case 2:
+            if(parpid == pids[i])
+                printF("%d\t%s\t\t%s\n",pids[i],name, "BLOCKED");
+            else
+                printF("%d\t%s%s\t\t%s\n",pids[i],name,"_child", "BLOCKED");
+            break;
+        case 3:
+            if(parpid == pids[i])
+                printF("%d\t%s\t\t%s\n",pids[i],name, "STOPPED");
+            else
+                printF("%d\t%s%s\t\t%s\n",pids[i],name,"_child", "STOPPED");
+            break;
+        default:
+            break;
         }
     }
     printF("\n");
 }
 
 void shell() {
-    proc_table.nextJobID = 0;
-    proc_table.proc[0].jobnumber=-1;
-    proc_table.freeJobIDpointer = -1;
-
     char line[50];
     char* argbuff[50];
 
@@ -176,10 +199,7 @@ void shell() {
         switch (first_letter) {
             case 'b':
                 if(strcmp(cmd,cmd_list[0]) == 0){
-                    int job = string2int(argbuff[1]);
-                    if(job != proc_table.proc[job].jobnumber)
-                        break;
-                    int proc_pid = proc_table.proc[job].pid;
+                    int proc_pid = string2int(argbuff[1]);
                     kill(proc_pid,SIGCONT);
                     //printF("Not Implemented\n");
                     break;
@@ -202,7 +222,7 @@ void shell() {
                                     redir(0, prevpipe); 
                                 int success = exec(argbuff[j], &argbuff[j]);
                                 if(success<0){
-                                    exit();
+                                    exit(-1);
                                 }
                             }
                             else{
@@ -211,8 +231,6 @@ void shell() {
                                 prevpipe = pipe;
                                 if(j == 1)
                                     firstpid = pid;
-                                if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
-                                    update_table();
                                 add_proc(pid, argbuff[j]);
                                 j = i + 1;
                             }
@@ -224,7 +242,7 @@ void shell() {
                                     redir(0, prevpipe);
                                 int success = exec(argbuff[j], &argbuff[j]);
                                 if(success<0){
-                                    exit();
+                                    exit(-1);
                                 }
                             }
                             else{
@@ -232,8 +250,6 @@ void shell() {
                                     close(prevpipe);
                                 if(j == 1)
                                     firstpid = pid;
-                                if(proc_table.nextJobID>=50 && proc_table.freeJobIDpointer<0)
-                                    update_table();
                                 add_proc(pid, argbuff[j]);
                                 waitpid(firstpid);
                             }
@@ -245,10 +261,7 @@ void shell() {
                 }
             case 'f':
                 if(strcmp(cmd,cmd_list[2]) == 0){
-                    int job = string2int(argbuff[1]);
-                    if(job != proc_table.proc[job].jobnumber)
-                        break;
-                    int proc_pid = proc_table.proc[job].pid;
+                    int proc_pid = string2int(argbuff[1]);
                     waitpid(proc_pid);
                     //printF("Not Implemented\n");
                     break;
@@ -260,11 +273,8 @@ void shell() {
                 }
             case 'n':
                 if(strcmp(cmd,cmd_list[4]) == 0){
-                    int job = string2int(argbuff[1]);
+                    int proc_pid = string2int(argbuff[1]);
                     int priority = string2int(argbuff[2]);
-                    if(job != proc_table.proc[job].jobnumber)
-                        break;
-                    int proc_pid = proc_table.proc[job].pid;
                     nice(proc_pid, priority);
                     break;
                 }

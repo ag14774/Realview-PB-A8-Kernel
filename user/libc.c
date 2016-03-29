@@ -14,8 +14,12 @@ int fork() {
   return r;
 }
 
-void exit() {
-    asm volatile( "svc #3    \n");
+void exit(int status) {
+  asm volatile( "mov r0, %0 \n"
+                "svc #3     \n"
+              :
+              : "r" (status)
+              : "r0" );
 }
 
 int waitpid(int pid) {
@@ -166,6 +170,19 @@ void close(int fd){
                 :
                 : "r" (fd)
                 : "r0" );
+}
+
+int getppid(int pid){
+    int r;
+
+    asm volatile( "mov r0, %1 \n"
+                  "svc #15    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (pid)
+                : "r0" );
+
+    return r;
 }
 
 int read_line(char b[], size_t array_size){

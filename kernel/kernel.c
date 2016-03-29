@@ -29,7 +29,11 @@ uint32_t find_entry(char* pn){
 }
 
 void __user_exit(int r){
-    asm volatile("svc #3     \n");
+  asm volatile( "mov r0, %0 \n"
+                "svc #3     \n"
+              :
+              : "r" (r)
+              : "r0" );
 }
 
 //Transfers buffer control from process 'from' to process 'to'
@@ -213,6 +217,8 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   programs[4].entry = (uint32_t)entry_testPipe;
   programs[5].name  = "P3";
   programs[5].entry = (uint32_t)entry_P3;
+  programs[6].name  = "shell";
+  programs[6].entry = (uint32_t)entry_shell;
 
   initialise_scheduler((uint32_t)&tos_irq);
   
@@ -624,6 +630,22 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     case 0x0E : { //close(fd)
       int fd = (int) ctx->gpr[0];
       __close(current, fd);
+      break;
+    }
+    case 0x0F : { //int getppid(pid)
+      int pid = (int) ctx->gpr[0];
+      pcb_t* p = find_pid_ht(ht_ptr,pid);
+      if(!p){
+        ctx->gpr[0] = -1;
+        break;
+      }
+      pcb_t* pp = p->ph.parent;
+      int ppid;
+      if(!pp)
+        ppid = 1;
+      else
+        ppid = pp->pid;
+      ctx->gpr[0] = ppid;
       break;
     }
     default   : { // unknown
