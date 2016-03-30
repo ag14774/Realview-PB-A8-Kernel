@@ -228,12 +228,8 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   __open(p, 1, -1, stdio, -1, WRITE_ONLY|KEEP_ON_EXEC);
   schedule(temp);
 
-  //temp = init_pcb((uint32_t)entry_P0);
-  //schedule(temp);
-  //temp = init_pcb((uint32_t)entry_P1);
-  //schedule(temp);
-  //temp = init_pcb((uint32_t)entry_P2);
-  //schedule(temp);
+  if(load_sb())
+    format_disk();
 
   /* Once the PCBs are initialised, we (arbitrarily) select one to be
    * restored (i.e., executed) when the function then returns.

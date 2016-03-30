@@ -9,7 +9,7 @@
  QEMU_PATH        = /usr
  QEMU_GDB         =        127.0.0.1:1234
  QEMU_UART        = stdio
-#QEMU_UART       += telnet:127.0.0.1:1235,server
+ QEMU_UART       += telnet:127.0.0.1:1235,server
 #QEMU_UART       += telnet:127.0.0.1:1236,server
 
  LINARO_PATH      = /usr/local/gcc-linaro-5.1-2015.08-x86_64_arm-eabi
