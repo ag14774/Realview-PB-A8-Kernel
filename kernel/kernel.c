@@ -70,6 +70,8 @@ int __close(pcb_t* p, int fd){
                 close_pipe(pipes_ptr, inode);
                 break;
             case file:
+                close_global_entry(filetable_ptr, globalID);
+                clear_file_cache(inode);
                 break;
             default:
                 break;
@@ -108,6 +110,7 @@ void __exit(ctx_t* ctx, int destroy, pid_t pid){
 }
 
 int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int flags){
+    int i;
     if(!p)
         return -1;
     if(fd>=0 && p->fdtable.fd[fd].active)
@@ -119,7 +122,7 @@ int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int fla
         case stdio:
             if(!filetable_ptr->entries[0].active){
                 get_global_entry(filetable_ptr, 0); //0 is always the stdio entry
-                setGlobalEntry(filetable_ptr, 0, 0, NULL, type);
+                setGlobalEntry(filetable_ptr, 0, 0, type);
             }
             setFileDes(p, fd2, 0, flags, 0);
             filetable_ptr->entries[0].refcount++;
@@ -144,12 +147,24 @@ int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int fla
                 globalID = get_global_entry(filetable_ptr, globalID);
                 inode = get_pipe(pipes_ptr, inode);
                 setPipe(pipes_ptr, inode, globalID); //connect pipe with globalID
-                setGlobalEntry(filetable_ptr, globalID, inode, NULL, type); //connect globalID with pipe
+                setGlobalEntry(filetable_ptr, globalID, inode, type); //connect globalID with pipe
             }
             setFileDes(p, fd2, globalID, flags, 0); //connect FileDes with globalID
             filetable_ptr->entries[globalID].refcount++;
             break;
         case file:
+            for(i = 0;i<MAXGLOBAL;i++){
+                if(filetable_ptr->entries[i].inode == inode){
+                    globalID = i;
+                    break;
+                }
+            }
+            if(i==MAXGLOBAL){
+                globalID = get_global_entry(filetable_ptr, -1);
+                setGlobalEntry(filetable_ptr, globalID, inode, type); //connect globalID with pipe
+            }
+            setFileDes(p, fd2, globalID, flags, 0); //connect FileDes with globalID
+            filetable_ptr->entries[globalID].refcount++;
             break;
         default:
             return -1;
@@ -362,6 +377,12 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           break;
         }
         case file : {
+          char* x = (char*)(ctx->gpr[1]);
+          int  n = (int )(ctx->gpr[2]);
+          for(int i=0;i<n;i++){
+            write_file(gentry->inode,fentry->rwpointer++,x[i]);
+          }
+          ctx->gpr[3] = n;
           break;
         }
         default : {
@@ -467,6 +488,12 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           break;
         }
         case file : {
+          char* x = (char*)(ctx->gpr[1]);
+          int  n = (int )(ctx->gpr[2]);
+          for(int i=0;i<n;i++){
+            x[i] = read_file(gentry->inode,fentry->rwpointer++);
+          }
+          ctx->gpr[3] = n;
           break;
         }
         default : {

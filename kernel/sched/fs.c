@@ -13,7 +13,6 @@ uint32_t max_files;
 uint32_t data_start;
 
 cache_ht cache;
-active_inode_ht active_inodes;
 
 void write_inode_field(i_node inode, uint32_t field, uint32_t data){
    uint32_t used_offset  = offsetof(inode_t,used);
@@ -144,15 +143,61 @@ void write_file(i_node inode, uint32_t offset, uint8_t b){
     }
 }
 
-void create_dir(i_node parent, const char* name){
+uint8_t read_file(i_node inode, uint32_t offset){
+    uint32_t active = read_inode_field(inode, 0);
+    if(!active)
+        return 0;
+    uint32_t block         = offset/block_len;//where I want to write
+    uint32_t block_off     = offset%block_len;//where I want to write
+    uint32_t size          = read_inode_field(inode, 2);
+    if(offset>=size){
+        return 0;
+    }
+    else {
+        uint32_t block_addr = read_inode_field(inode, 3+block);
+        if(block_addr==0)
+            return 0; //THIS SHOULD NEVER HAPPEN IF offset<size
+        return disk_rd_byte(block_addr*block_len+block_off);
+    }
+}
+
+i_node find_file(i_node parent, const char* name){
+    uint32_t parent_used = read_inode_field(parent, 0);
+    if(!parent_used)
+        return -1;
+    uint32_t parent_mode = read_inode_field(parent, 1);
+    if(parent_mode != 0)
+        return -1;
+    uint32_t size = read_inode_field(parent, 2);
+    dentry_t dentry;
+    uint8_t* ptr = (uint8_t*)&dentry;
+    int i = 0;
+    int j = 0;
+    while(i<size){
+        ptr[j] = read_file(parent, i);
+        i++;
+        j = (j+1)%sizeof(dentry_t);
+        if(j==0 && strcmp(dentry.name,name)==0)
+            return dentry.inode;
+    }
+    return -1;
+}
+
+void create_dentry(i_node parent, const char* name, int dir){
     uint32_t parent_used = read_inode_field(parent, 0);
     if(!parent_used)
         return;
     uint32_t parent_mode = read_inode_field(parent, 1);
     if(parent_mode != 0)//not a directory
         return;
+    if(find_file(parent, name)!=-1)
+        return; //already exists
     dentry_t dentry;
     dentry.inode = get_free_inode();
+    if(dir)
+        write_inode_field(dentry.inode, 1, 0);
+    else
+        write_inode_field(dentry.inode, 1 ,1);
     memcpy(dentry.name,name,12);
     uint8_t* ptr = (uint8_t*)&dentry;
     for(int i=0;i<sizeof(dentry_t);i++){
@@ -161,19 +206,31 @@ void create_dir(i_node parent, const char* name){
     }
 }
 
-uint32_t inode_hash(i_node inode){
-    return ((uint32_t)(282563095*inode+29634029) % 993683819) % ACTIVE_INODE_HT ; //best so far
-}
-
-inode_entry* find_active_inode(i_node inode){
-    uint32_t index = inode_hash(inode);
-    int j=0;
-    for(j=0;j<ACTIVE_INODE_BUCKET;j++){
-        if(active_inodes.entries[index][j].active && active_inodes.entries[index][j].inode == inode){
-            return &active_inodes.entries[index][j];
+i_node parse_path(char* path){
+    if(path[0]!='/')
+        return -1;
+    int i = 1;
+    char* temp = &path[i];
+    i_node curr_inode = 0;//root inode
+    while(1){
+        if(path[i]=='/'){
+            path[i] = '\0';
+            curr_inode = find_file(curr_inode, temp);
+            uint32_t mode = read_inode_field(curr_inode, 1);
+            if(mode==1)
+                return -1;
+            temp = &path[i+1];
         }
+        else if(path[i]=='\0'){
+            curr_inode = find_file(curr_inode, temp);
+            uint32_t mode = read_inode_field(curr_inode, 1);
+            if(mode==0)
+                return -1;
+            return curr_inode;
+        }
+        i++;
     }
-    return NULL;
+    return -1;
 }
 
 uint32_t cache_hash(uint32_t block_addr){
@@ -248,6 +305,25 @@ void empty_cache_block(uint32_t block_addr, int write2disk){
         centry->next->prev = centry->prev;
 }
 
+void clear_file_cache(i_node inode){
+    uint32_t used = read_inode_field(inode,0);
+    if(!used)
+        return;
+    uint32_t size = read_inode_field(inode,2);
+    for(int i=0;i<MAX_DIRECT_BLOCKS;i++){
+        uint32_t block_addr = read_inode_field(inode, 3+i);
+        if(block_addr!=0){
+            empty_cache_block(block_addr, 1);
+        }
+    }
+    uint32_t inode_addr  = inode_start*block_len + inode*sizeof(inode_t);
+    uint32_t inode_block = inode_addr / block_len;
+    uint32_t size_in_blocks = sizeof(inode_t) / block_len;
+    for(int i=0;i<=size_in_blocks;i++){ //<= because we add 1 to make sure we write the whole inode into the disk(in case it's not aligned)
+        empty_cache_block(inode_block+i,1);
+    }
+}
+
 void empty_cache(){
     while(cache.head)
         empty_cache_block(cache.head->block_addr, 1);
@@ -315,16 +391,12 @@ int get_global_entry(global_table* t, int globalID){
     return -1;
 }
 
-void setGlobalEntry(global_table* t, int globalID, i_node inode, char name[], file_type type){
+void setGlobalEntry(global_table* t, int globalID, i_node inode, file_type type){
     if(!t->entries[globalID].active)
         return;
     t->entries[globalID].globalID = globalID;
     t->entries[globalID].refcount = 0;
     t->entries[globalID].inode    = inode;
-    if(name)
-        memcpy(t->entries[globalID].name,name,20);
-    else
-        t->entries[globalID].name[0] = '\0';
     t->entries[globalID].type = type;
     t->entries[globalID].wqwrite.head = 0;
     t->entries[globalID].wqwrite.tail = 0;
@@ -397,7 +469,6 @@ int close_global_entry(global_table* t, int globalID){ //close pipe or file firs
         return -1;
     t->entries[globalID].active = 0;
     t->entries[globalID].inode  = 0;
-    t->entries[globalID].name[0]='\0';
     t->count--;
     return 0;
 }
@@ -584,8 +655,13 @@ void format_disk(){
     
     empty_cache();
 
-    create_dir(0, "testdir");
+    create_dentry(0,"test1",1);
+    create_dentry(0,"test2",1);
+    create_dentry(1,"test1",1);
+    create_dentry(3,"test5",1);
+    create_dentry(4,"test9",0);
 
     empty_cache();
+    parse_path("/test1/test1/test5/test9");
 
 }

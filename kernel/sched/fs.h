@@ -16,9 +16,6 @@
 #define CACHE_SIZE 128
 #define CACHE_BUCKET 5
 
-#define ACTIVE_INODE_HT 50
-#define ACTIVE_INODE_BUCKET 5
-
 typedef int i_node;
 
 typedef enum {stdio, pipe, file} file_type;
@@ -41,16 +38,6 @@ typedef struct{
     i_size size; //2 bytes
     i_block blocks[MAX_DIRECT_BLOCKS]; //4 bytes each
 }inode_t;
-
-typedef struct{
-    uint8_t active;
-    i_node inode;
-    inode_t disk_inode;
-} inode_entry;
-
-typedef struct{
-    inode_entry entries[ACTIVE_INODE_HT][ACTIVE_INODE_BUCKET];
-} active_inode_ht;
 
 typedef struct{
     i_node inode;
@@ -84,7 +71,6 @@ typedef struct{
     int refcount;
     uint8_t active;
     i_node inode;
-    char name[20];
     file_type type;
     wait_queue wqwrite;
     wait_queue wqread;
@@ -110,7 +96,7 @@ typedef struct{
 } cache_ht;
 
 int get_global_entry(global_table* t, int globalID); //if globalID negative, then return the first that is free
-void setGlobalEntry(global_table* t, int globalID, i_node inode, char name[], file_type type);
+void setGlobalEntry(global_table* t, int globalID, i_node inode, file_type type);
 void enqueue_wq(global_table* t, int globalID, int queue, int pid); //queue 0 is write, read otherwise
 void remove_wq(global_table* t, int globalID, int queue, int pid);
 int dequeue_wq(global_table* t, int globalID, int queue); //queue 0 is write, read otherwise. return 0 if empty;
@@ -142,8 +128,11 @@ uint32_t read_inode_field(i_node inode, uint32_t field);
 i_node get_free_inode();
 i_node get_free_block();
 void write_file(i_node inode, uint32_t offset, uint8_t b);
-void create_dir(i_node parent, const char* name);
+uint8_t read_file(i_node inode, uint32_t offset);
+void create_dentry(i_node parent, const char* name, int dir);
+i_node find_file(i_node parent, const char* name);
+i_node parse_path(char* path);
+void clear_file_cache(i_node inode);
 
-inode_entry* find_active_inode(i_node inode);
 
 #endif
