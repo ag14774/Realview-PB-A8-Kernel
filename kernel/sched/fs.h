@@ -16,9 +16,46 @@
 #define CACHE_SIZE 128
 #define CACHE_BUCKET 5
 
+#define ACTIVE_INODE_HT 50
+#define ACTIVE_INODE_BUCKET 5
+
 typedef int i_node;
 
 typedef enum {stdio, pipe, file} file_type;
+
+typedef struct{
+    char magic[4];
+    uint32_t block_bitmap_start;
+    uint32_t inode_start;
+    uint32_t data_start;
+} superblock_t;
+
+typedef uint8_t i_used;
+typedef uint8_t i_mode;
+typedef uint16_t i_size;
+typedef uint32_t i_block;
+
+typedef struct{
+    i_used used; //1 byte
+    i_mode mode; //1 bytes //0 is directory, 1 is file
+    i_size size; //2 bytes
+    i_block blocks[MAX_DIRECT_BLOCKS]; //4 bytes each
+}inode_t;
+
+typedef struct{
+    uint8_t active;
+    i_node inode;
+    inode_t disk_inode;
+} inode_entry;
+
+typedef struct{
+    inode_entry entries[ACTIVE_INODE_HT][ACTIVE_INODE_BUCKET];
+} active_inode_ht;
+
+typedef struct{
+    i_node inode;
+    char name[12];
+}dentry_t;
 
 typedef struct{
     int head;
@@ -41,23 +78,6 @@ typedef struct{
     pipe_t p[MAXPIPES];
     int count;
 } pipes_t;
-
-typedef struct{
-    char magic[4];
-    uint32_t block_bitmap_start;
-    uint32_t inode_start;
-    uint32_t data_start;
-} superblock_t;
-
-typedef uint16_t i_free;
-typedef uint16_t i_size;
-typedef uint32_t i_block;
-
-typedef struct{
-    i_free free;
-    i_size size;
-    i_block blocks[MAX_DIRECT_BLOCKS];
-}inode_t;
 
 typedef struct{
     int globalID;
@@ -116,5 +136,14 @@ int load_sb(); //0 if no format needed
 void format_disk();
 void set_block_bit(uint32_t block_addr);
 void clear_block_bit(uint32_t block_addr);
+uint8_t get_block_bit(uint32_t block_addr);
+void write_inode_field(i_node inode, uint32_t field, uint32_t data);
+uint32_t read_inode_field(i_node inode, uint32_t field);
+i_node get_free_inode();
+i_node get_free_block();
+void write_file(i_node inode, uint32_t offset, uint8_t b);
+void create_dir(i_node parent, const char* name);
+
+inode_entry* find_active_inode(i_node inode);
 
 #endif

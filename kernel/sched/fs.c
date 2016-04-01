@@ -9,9 +9,172 @@ uint32_t bl_bitmap_size;
 uint32_t bl_bitmap_start;
 uint32_t inode_start;
 uint32_t max_file_size;
+uint32_t max_files;
 uint32_t data_start;
 
 cache_ht cache;
+active_inode_ht active_inodes;
+
+void write_inode_field(i_node inode, uint32_t field, uint32_t data){
+   uint32_t used_offset  = offsetof(inode_t,used);
+   uint32_t mode_offset  = offsetof(inode_t,mode);
+   uint32_t size_offset  = offsetof(inode_t,size);
+   uint32_t block_offset = offsetof(inode_t,blocks);
+   
+   uint32_t inode_addr = inode_start*block_len + inode*sizeof(inode_t);
+   
+   if(field==0){
+       uint8_t data8 = (uint8_t)data;
+       disk_wr_byte(inode_addr+used_offset, data8);
+   }
+   else if(field==1){
+       uint8_t data8 = (uint8_t)data;
+       disk_wr_byte(inode_addr+mode_offset, data8);
+   }
+   else if(field==2){
+       uint8_t* data16 = (uint8_t*)&data;
+       for(int i=0;i<sizeof(i_size);i++)
+           disk_wr_byte(inode_addr+size_offset+i,data16[i]);
+   }
+   else if(field>=3){
+       block_offset = block_offset+(field-3)*sizeof(i_block);
+       uint8_t* data32 = (uint8_t*)&data;
+       for(int i=0;i<sizeof(i_block);i++)
+           disk_wr_byte(inode_addr+block_offset+i,data32[i]);
+   }
+}
+
+uint32_t read_inode_field(i_node inode, uint32_t field){
+   uint32_t used_offset  = offsetof(inode_t,used);
+   uint32_t mode_offset  = offsetof(inode_t,mode);
+   uint32_t size_offset  = offsetof(inode_t,size);
+   uint32_t block_offset = offsetof(inode_t,blocks);
+   
+   uint32_t inode_addr = inode_start*block_len + inode*sizeof(inode_t);
+   uint32_t data = 0;
+   if(field==0){
+       data = disk_rd_byte(inode_addr+used_offset);
+   }
+   else if(field==1){
+       data = disk_rd_byte(inode_addr+mode_offset);
+   }
+   else if(field==2){
+       i_size data16 = 0;
+       uint8_t* data16_ptr = (uint8_t*)&data16;
+       for(int i=0;i<sizeof(i_size);i++)
+           data16_ptr[i] = disk_rd_byte(inode_addr+size_offset+i);
+       data = data16;
+   }
+   else if(field>=3){
+       block_offset = block_offset+(field-3)*sizeof(i_block);
+       i_block data32 = 0;
+       uint8_t* data32_ptr = (uint8_t*)&data32;
+       for(int i=0;i<sizeof(i_block);i++)
+           data32_ptr[i] = disk_rd_byte(inode_addr+block_offset+i);
+       data = data32;
+   }
+
+   return data;
+
+}
+
+i_node get_free_inode(){
+    for(int i=0;i<max_files;i++){
+        uint32_t used = read_inode_field(i, 0);
+        if(!used){
+            for(int j=0;j<MAX_DIRECT_BLOCKS+3;j++)
+                write_inode_field(i,j,0);
+            write_inode_field(i, 0 ,1);
+            return i;
+        }
+    }
+    return -1;
+}
+
+i_node get_free_block(){
+    for(int i=data_start;i<block_num;i++){
+        uint32_t used = get_block_bit(i);
+        if(!used){
+            set_block_bit(i);
+            for(int j=0;j<block_len;j++){
+                disk_wr_byte(i*block_len+j,0);
+            }
+            return i;
+        }
+    }
+    return -1;
+}
+
+//should also update active inode table if there is an entry
+void write_file(i_node inode, uint32_t offset, uint8_t b){
+    uint32_t active = read_inode_field(inode, 0);
+    if(!active)
+        return;
+    uint32_t block         = offset/block_len;//where I want to write
+    uint32_t block_off     = offset%block_len;//where I want to write
+    uint32_t size          = read_inode_field(inode, 2);
+    uint32_t block_now     = size/block_len;
+    uint32_t block_now_off = size%block_len;
+    if(offset<size){
+        uint32_t block_addr = read_inode_field(inode, 3+block);
+        if(block_addr==0)
+            return; //THIS SHOULD NEVER HAPPEN IF offset<size
+        disk_wr_byte(block_addr*block_len+block_off, b);
+    }
+    else{
+        int j = block_now_off;
+        for(int i=block_now;i<block;i++){
+            uint32_t block_addr = read_inode_field(inode, 3+i);
+            if(block_addr == 0){
+                block_addr = get_free_block();
+                write_inode_field(inode, 3+i, block_addr);
+            }
+            size = size + (block_len - j);
+            write_inode_field(inode, 2, size);
+            j = 0;
+        }
+        uint32_t block_addr = read_inode_field(inode, 3+block);
+        if(block_addr == 0){
+            block_addr = get_free_block();
+            write_inode_field(inode, 3+block, block_addr);
+        }
+        size = size + (block_off - j) + 1;
+        write_inode_field(inode, 2, size);
+        disk_wr_byte(block_addr*block_len+block_off,b);
+    }
+}
+
+void create_dir(i_node parent, const char* name){
+    uint32_t parent_used = read_inode_field(parent, 0);
+    if(!parent_used)
+        return;
+    uint32_t parent_mode = read_inode_field(parent, 1);
+    if(parent_mode != 0)//not a directory
+        return;
+    dentry_t dentry;
+    dentry.inode = get_free_inode();
+    memcpy(dentry.name,name,12);
+    uint8_t* ptr = (uint8_t*)&dentry;
+    for(int i=0;i<sizeof(dentry_t);i++){
+        uint32_t size = read_inode_field(parent,2);
+        write_file(parent, size, ptr[i]);
+    }
+}
+
+uint32_t inode_hash(i_node inode){
+    return ((uint32_t)(282563095*inode+29634029) % 993683819) % ACTIVE_INODE_HT ; //best so far
+}
+
+inode_entry* find_active_inode(i_node inode){
+    uint32_t index = inode_hash(inode);
+    int j=0;
+    for(j=0;j<ACTIVE_INODE_BUCKET;j++){
+        if(active_inodes.entries[index][j].active && active_inodes.entries[index][j].inode == inode){
+            return &active_inodes.entries[index][j];
+        }
+    }
+    return NULL;
+}
 
 uint32_t cache_hash(uint32_t block_addr){
     return ((uint32_t)(282563095*block_addr+29634029) % 993683819) % CACHE_SIZE ; //best so far
@@ -110,7 +273,7 @@ void set_block_bit(uint32_t block_addr){
     uint32_t byte_addr = block_addr/8 + bl_bitmap_start*block_len;
     uint8_t bit_offset = block_addr%8;
     uint8_t temp = disk_rd_byte(byte_addr);
-    temp |= 1<<bit_offset;
+    temp |= 0x80>>bit_offset;
     disk_wr_byte(byte_addr, temp);
 }
 
@@ -118,8 +281,20 @@ void clear_block_bit(uint32_t block_addr){
     uint32_t byte_addr = block_addr/8 + bl_bitmap_start*block_len;
     uint8_t bit_offset = block_addr%8;
     uint8_t temp = disk_rd_byte(byte_addr);
-    temp &= ~(1<<bit_offset);
+    temp &= ~(0x80>>bit_offset);
     disk_wr_byte(byte_addr, temp);
+}
+
+//0,1,2,3,4,5,6,7,8,9,10,11,12,...
+uint8_t get_block_bit(uint32_t block_addr){
+    uint32_t byte_addr = block_addr/8 +bl_bitmap_start*block_len;
+    uint8_t bit_offset = block_addr%8;
+    uint8_t temp = disk_rd_byte(byte_addr);
+    temp &= (0x80>>bit_offset);
+    if(temp == (0x80>>bit_offset))
+        return 1;
+    else
+        return 0;
 }
 
 int get_global_entry(global_table* t, int globalID){
@@ -315,6 +490,7 @@ int load_sb(){
     bl_bitmap_size  = 0;
     bl_bitmap_start = 0;
     inode_start     = 0;
+    max_files       = 0;
     max_file_size   = 0;
     data_start      = 0;
     char sbtemp[MAX_BLOCK_SIZE];
@@ -338,6 +514,7 @@ int load_sb(){
     inode_start = sb->inode_start;
     max_file_size = block_len * MAX_DIRECT_BLOCKS;
     data_start = sb->data_start;
+    max_files      = (disk_size - inode_start*block_len)/(inode_size+max_file_size);
     return 0;
 }
 
@@ -369,7 +546,7 @@ void format_disk(){
     inode_start = inode_start/block_len; //convert to block address;
 
     max_file_size  = block_len * MAX_DIRECT_BLOCKS;
-    uint32_t max_files      = (disk_size - inode_start*block_len)/(inode_size+max_file_size); //IS THIS CORRECT?
+    max_files      = (disk_size - inode_start*block_len)/(inode_size+max_file_size); //IS THIS CORRECT?
 
     data_start = inode_start*block_len + max_files*inode_size;
     while(data_start % block_len !=0) data_start++;
@@ -390,24 +567,25 @@ void format_disk(){
     }
 
     for(int i=0;i<data_start;i++){
-        clear_block_bit(i);
+        set_block_bit(i);
     }
     
     for(int i=data_start;i<block_num;i++){
-        set_block_bit(i);
+        clear_block_bit(i);
     }
 
-    inode_t inode;
-    inode.free = 0;
-    inode.size = 0;
-    for(int i=0;i<MAX_DIRECT_BLOCKS;i++)
-        inode.blocks[i] = 0;
-
-    uint8_t* inode_ptr = (uint8_t*)&inode.free;
     for(int i=0;i<max_files;i++){
-        for(int j=0;j<sizeof(uint16_t);j++){
-            disk_wr_byte(block_len*inode_start+i*inode_size+j,inode_ptr[j]);
-        }
+        write_inode_field(i, 0, 0);
     }
+
+    i_node root = get_free_inode();
+    if(root != 0)
+        return; //THIS SHOULD BE 0
+    
     empty_cache();
+
+    create_dir(0, "testdir");
+
+    empty_cache();
+
 }

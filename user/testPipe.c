@@ -17,7 +17,9 @@ void testPipe() {
     char c;
     printF("I'm parent\n");
     while(1){
-      int r = read_line(&c, 1);
+      //int r = read_line(&c, 1);
+      int r=0;
+      c='f';
       int w = write(fd, &c, 1);
       printF("In: %d | Out: %d\n", r, w);
     }
