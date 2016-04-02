@@ -183,6 +183,76 @@ i_node find_file(i_node parent, const char* name){
     return -1;
 }
 
+void clear_file(i_node inode){
+    uint32_t used = read_inode_field(inode, 0);
+    if(!used)
+        return;
+    uint32_t mode = read_inode_field(inode ,1);
+    if(mode == 1){ //normal file
+        for(int i=0;i<MAX_DIRECT_BLOCKS;i++){
+            uint32_t block_addr = read_inode_field(inode, 3+i);
+            if(block_addr!=0){
+                clear_block_bit(block_addr);
+                write_inode_field(inode, 3+i, 0);
+            }
+        }
+        write_inode_field(inode, 2, 0);
+    }
+}
+
+void delete_dentry(char* path){
+    if(path[0]!='/')
+        return;
+    int i = 1;
+    char* temp = &path[i];
+    i_node curr_inode = 0;//root inode
+    while(1){
+        if(path[i]=='/'){
+            path[i] = '\0';
+            curr_inode = find_file(curr_inode, temp);
+            uint32_t mode = read_inode_field(curr_inode, 1);
+            if(mode==1)
+                return;
+            temp = &path[i+1];
+        }
+        else if(path[i]=='\0'){
+            uint32_t parent_inode = curr_inode;
+            curr_inode = find_file(curr_inode, temp);
+            uint32_t mode = read_inode_field(curr_inode, 1);
+            uint32_t size = read_inode_field(curr_inode, 2);
+            if(mode == 0 && size>0){
+                return;
+            }
+            else{
+                dentry_t dentries[20];
+                for(int c=0;c<20;c++)
+                    dentries[c].inode = -1;
+                uint8_t* ptr = (uint8_t*)dentries;
+                clear_file(curr_inode);
+                uint32_t parsize = read_inode_field(parent_inode, 2);
+                for(int c=0;c<parsize;c++){
+                    ptr[c] = read_file(parent_inode,c);
+                }
+                clear_file(parent_inode);
+                write_inode_field(curr_inode, 0, 0);
+                for(int c=0;c<20;c++){
+                    if(dentries[i].inode == -1)
+                        break;
+                    if(dentries[i].inode != curr_inode){
+                        ptr = (uint8_t*)&dentries[i];
+                        for(int j=0;j<sizeof(dentry_t);j++){
+                            parsize = read_inode_field(parent_inode, 2);
+                            write_file(parent_inode, parsize, ptr[j]);
+                        }
+                    }
+                }      
+            }
+            return;
+        }
+        i++;
+    }
+}
+
 void create_dentry(i_node parent, const char* name, int dir){
     uint32_t parent_used = read_inode_field(parent, 0);
     if(!parent_used)
@@ -207,6 +277,8 @@ void create_dentry(i_node parent, const char* name, int dir){
 }
 
 i_node parse_path(char* path){
+    if(path[0]=='\0')
+        return 0;//root
     if(path[0]!='/')
         return -1;
     int i = 1;
@@ -216,6 +288,8 @@ i_node parse_path(char* path){
         if(path[i]=='/'){
             path[i] = '\0';
             curr_inode = find_file(curr_inode, temp);
+            if(curr_inode == -1)
+                return -1;
             uint32_t mode = read_inode_field(curr_inode, 1);
             if(mode==1)
                 return -1;
@@ -223,9 +297,6 @@ i_node parse_path(char* path){
         }
         else if(path[i]=='\0'){
             curr_inode = find_file(curr_inode, temp);
-            uint32_t mode = read_inode_field(curr_inode, 1);
-            if(mode==0)
-                return -1;
             return curr_inode;
         }
         i++;
@@ -654,14 +725,5 @@ void format_disk(){
         return; //THIS SHOULD BE 0
     
     empty_cache();
-
-    create_dentry(0,"test1",1);
-    create_dentry(0,"test2",1);
-    create_dentry(1,"test1",1);
-    create_dentry(3,"test5",1);
-    create_dentry(4,"test9",0);
-
-    empty_cache();
-    parse_path("/test1/test1/test5/test9");
 
 }

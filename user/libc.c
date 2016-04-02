@@ -185,6 +185,29 @@ int getppid(int pid){
     return r;
 }
 
+int creat(char* path){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "svc #16    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (path)
+                : "r0" );
+    return r;
+}
+
+int open(char* path, int flags){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "mov r1, %2 \n"
+                  "svc #17    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (path), "r" (flags)
+                : "r0", "r1" );
+    return r;
+}
+
 int read_line(char b[], size_t array_size){
   int chars = 0;
   if(array_size > 500)

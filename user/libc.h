@@ -67,4 +67,8 @@ void close(int fd);
 
 int getppid(int pid);
 
+int creat(char* path);
+
+int open(char* path, int flags);
+
 #endif

@@ -129,6 +129,8 @@ i_node get_free_inode();
 i_node get_free_block();
 void write_file(i_node inode, uint32_t offset, uint8_t b);
 uint8_t read_file(i_node inode, uint32_t offset);
+void clear_file(i_node inode);
+void delete_dentry(char* path);
 void create_dentry(i_node parent, const char* name, int dir);
 i_node find_file(i_node parent, const char* name);
 i_node parse_path(char* path);

@@ -671,6 +671,55 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       ctx->gpr[0] = ppid;
       break;
     }
+    case 0x10 : { //creat(path) creates file(not a directory)
+      char*  path0   = (char * ) ctx->gpr[0];
+      char path[100];
+      path[0]='\0';
+      strcat(path, path0);
+      char*  lastslash = path;
+      if(path[0]=='/'){ //absolute path
+        for(int i=0;path[i]!='\0';i++){
+            if(path[i]=='/'){
+                lastslash = &path[i];
+            }
+        }
+        *lastslash = '\0';
+        i_node parent_inode = parse_path(path);
+        if(parent_inode == -1){
+            ctx->gpr[0] = -1;
+        }
+        else{
+            create_dentry(parent_inode, ++lastslash, 0);
+            ctx->gpr[0] = 0;
+        }
+      }
+      else{
+        ctx->gpr[0] = -1;
+      }
+      break;
+    }
+    case 0x11 : { //int fd = open(path,flags) only read, write, or readwrite flags
+      char* path0 = (char*) ctx->gpr[0];
+      char path[100];
+      path[0]='\0';
+      strcat(path, path0);
+      int  flags = (int  ) ctx->gpr[1];
+      if(path[0]=='/'){//absolute path
+        i_node inode = parse_path(path);
+        if(inode == -1){
+            ctx->gpr[0] = -1;
+            break;
+        }
+        ctx->gpr[0] = __open(current, -1, -1, file, inode, flags);
+      }
+      else{ //relative paths not supported
+        ctx->gpr[0] = -1;
+      }
+      break;
+    }
+    case 0x12 : { //
+      break;
+    }
     default   : { // unknown
       break;
     }

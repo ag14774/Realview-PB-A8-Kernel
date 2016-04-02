@@ -22,6 +22,12 @@ void P0() {
     //int chars = read_line(s,20);
     //printF("Characters read: %d\n", chars);
     //printF("Input text: %s\n",s);
+    int r = creat("/file1");
+    printF("File created: %d\n",r);
+    int fd = open("/file1",READ_WRITE);
+    char* x = "THIS SENTENCE IS MORE THAN 16 BYTES. YES IT IS";
+    write(fd, x, 47);
+    close(fd);
     for( uint32_t x = ( 1 << 8 ); x < ( 1 << 24 ); x++ ) {
       int r = is_prime( x ); printF( "is_prime( %d ) = %d\n", x, r );
     }
