@@ -208,6 +208,30 @@ int open(char* path, int flags){
     return r;
 }
 
+int unlink(char* path){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "svc #18    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (path)
+                : "r0" );
+    return r;
+}
+
+int lseek(int fd, int offset, int whence){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "mov r1, %2 \n"
+                  "mov r2, %3 \n"
+                  "svc #19    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (fd), "r" (offset), "r" (whence)
+                : "r0", "r1", "r2" );
+    return r;
+}
+
 int read_line(char b[], size_t array_size){
   int chars = 0;
   if(array_size > 500)

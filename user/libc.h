@@ -19,6 +19,10 @@
 #define KEEP_ON_EXIT  0x100
 #define CLOSE_ON_EXIT 0x000
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 // cooperatively yield control of processor, i.e., invoke the scheduler
 void yield();
 
@@ -71,4 +75,7 @@ int creat(char* path);
 
 int open(char* path, int flags);
 
+int unlink(char* path);
+
+int lseek(int fd, int offset, int whence);
 #endif

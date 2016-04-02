@@ -57,6 +57,8 @@ int __close(pcb_t* p, int fd){
     filetable_ptr->entries[globalID].refcount--;
     if(filetable_ptr->entries[globalID].refcount == 0 && close_on_exit == CLOSE_ON_EXIT){
         int inode = filetable_ptr->entries[globalID].inode;
+        i_node parent = filetable_ptr->entries[globalID].parent_inode;
+        int deleteRequested = filetable_ptr->entries[globalID].deleteRequested;
         file_type type = filetable_ptr->entries[globalID].type;
         switch(type){
             case stdio:
@@ -71,6 +73,9 @@ int __close(pcb_t* p, int fd){
                 break;
             case file:
                 close_global_entry(filetable_ptr, globalID);
+                if(deleteRequested){
+                    delete_dentry(parent, inode);
+                }
                 clear_file_cache(inode);
                 break;
             default:
@@ -153,13 +158,8 @@ int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int fla
             filetable_ptr->entries[globalID].refcount++;
             break;
         case file:
-            for(i = 0;i<MAXGLOBAL;i++){
-                if(filetable_ptr->entries[i].inode == inode){
-                    globalID = i;
-                    break;
-                }
-            }
-            if(i==MAXGLOBAL){
+            globalID = find_globalID_by_inode(filetable_ptr, inode);
+            if(globalID == -1){
                 globalID = get_global_entry(filetable_ptr, -1);
                 setGlobalEntry(filetable_ptr, globalID, inode, type); //connect globalID with pipe
             }
@@ -678,7 +678,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       strcat(path, path0);
       char*  lastslash = path;
       if(path[0]=='/'){ //absolute path
-        for(int i=0;path[i]!='\0';i++){
+        int i = 0;
+        for(i=0;path[i]!='\0';i++){
             if(path[i]=='/'){
                 lastslash = &path[i];
             }
@@ -689,6 +690,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
             ctx->gpr[0] = -1;
         }
         else{
+
             create_dentry(parent_inode, ++lastslash, 0);
             ctx->gpr[0] = 0;
         }
@@ -717,8 +719,72 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       }
       break;
     }
-    case 0x12 : { //
+    case 0x12 : { //unlink(char* path)
+      char*  path0   = (char * ) ctx->gpr[0];
+      char path[100];
+      path[0]='\0';
+      strcat(path, path0);
+      char* lastslash = path;
+      if(path[0]=='/'){ //absolute path
+        int i = 0;
+        for(i=0;path[i]!='\0';i++){
+            if(path[i]=='/'){
+                lastslash = &path[i];
+            }
+        }
+        *lastslash = '\0';
+        i_node parent_inode = parse_path(path);
+        if(parent_inode == -1){
+            ctx->gpr[0] = -1;
+        }
+        else{
+            i_node inode = find_file(parent_inode, ++lastslash);
+            int globalID = find_globalID_by_inode(filetable_ptr, inode);
+            if(globalID == -1){
+                delete_dentry(parent_inode, inode);
+            }
+            else{
+                filetable_ptr->entries[globalID].deleteRequested = 1;
+                filetable_ptr->entries[globalID].parent_inode = parent_inode;
+            }
+            ctx->gpr[0] = 0;
+        }
+      }
+      else{
+        ctx->gpr[0] = -1;
+      }
       break;
+    }
+    case 0x13 : { //int lseek(fd, offset, whence)
+        int fd     = (int) ctx->gpr[0];
+        int offset = (int) ctx->gpr[1];
+        int whence = (int) ctx->gpr[2];
+        fd_entry* fentry = &current->fdtable.fd[fd];
+        if(!fentry->active){
+            ctx->gpr[0] = -1;
+            break;
+        }
+        global_entry* gentry = &filetable_ptr->entries[fentry->globalID];
+        if(!gentry->active){
+            ctx->gpr[0] = -1;
+            break;
+        }
+        if(whence == SEEK_SET){
+            fentry->rwpointer = offset;
+        }
+        else if(whence == SEEK_CUR){
+            fentry->rwpointer = fentry->rwpointer + offset;
+        }
+        else if(whence == SEEK_END){
+            uint32_t size = read_inode_field(gentry->inode, 2);
+            fentry->rwpointer = size + offset;
+        }
+        else{
+            ctx->gpr[0] = -1;
+            break;
+        }
+        ctx->gpr[0] = fentry->rwpointer;
+        break;
     }
     default   : { // unknown
       break;

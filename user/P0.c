@@ -27,7 +27,11 @@ void P0() {
     int fd = open("/file1",READ_WRITE);
     char* x = "THIS SENTENCE IS MORE THAN 16 BYTES. YES IT IS";
     write(fd, x, 47);
+    lseek(fd, 0, SEEK_SET);
+    char c = 'g';
+    write(fd, &c, 1);
     close(fd);
+    unlink("/file1");
     for( uint32_t x = ( 1 << 8 ); x < ( 1 << 24 ); x++ ) {
       int r = is_prime( x ); printF( "is_prime( %d ) = %d\n", x, r );
     }

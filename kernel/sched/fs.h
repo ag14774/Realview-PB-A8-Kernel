@@ -6,6 +6,10 @@
 
 #include "disk.h"
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 #define MAXPIPES  50
 #define MAXGLOBAL 50
 #define PIPESIZE  500
@@ -74,6 +78,8 @@ typedef struct{
     file_type type;
     wait_queue wqwrite;
     wait_queue wqread;
+    int deleteRequested; //used by unlink
+    i_node parent_inode; //used by unlink
 } global_entry;
 
 typedef struct{
@@ -97,6 +103,7 @@ typedef struct{
 
 int get_global_entry(global_table* t, int globalID); //if globalID negative, then return the first that is free
 void setGlobalEntry(global_table* t, int globalID, i_node inode, file_type type);
+int find_globalID_by_inode(global_table* t, i_node inode);
 void enqueue_wq(global_table* t, int globalID, int queue, int pid); //queue 0 is write, read otherwise
 void remove_wq(global_table* t, int globalID, int queue, int pid);
 int dequeue_wq(global_table* t, int globalID, int queue); //queue 0 is write, read otherwise. return 0 if empty;
@@ -130,7 +137,7 @@ i_node get_free_block();
 void write_file(i_node inode, uint32_t offset, uint8_t b);
 uint8_t read_file(i_node inode, uint32_t offset);
 void clear_file(i_node inode);
-void delete_dentry(char* path);
+void delete_dentry(i_node parent, i_node inode);
 void create_dentry(i_node parent, const char* name, int dir);
 i_node find_file(i_node parent, const char* name);
 i_node parse_path(char* path);

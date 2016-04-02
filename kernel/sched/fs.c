@@ -187,69 +187,48 @@ void clear_file(i_node inode){
     uint32_t used = read_inode_field(inode, 0);
     if(!used)
         return;
-    uint32_t mode = read_inode_field(inode ,1);
-    if(mode == 1){ //normal file
-        for(int i=0;i<MAX_DIRECT_BLOCKS;i++){
-            uint32_t block_addr = read_inode_field(inode, 3+i);
-            if(block_addr!=0){
-                clear_block_bit(block_addr);
-                write_inode_field(inode, 3+i, 0);
-            }
+    for(int i=0;i<MAX_DIRECT_BLOCKS;i++){
+        uint32_t block_addr = read_inode_field(inode, 3+i);
+        if(block_addr!=0){
+            clear_block_bit(block_addr);
+            write_inode_field(inode, 3+i, 0);
         }
-        write_inode_field(inode, 2, 0);
     }
+    write_inode_field(inode, 2, 0);
 }
 
-void delete_dentry(char* path){
-    if(path[0]!='/')
+void delete_dentry(i_node parent, i_node inode){
+    uint32_t mode = read_inode_field(parent, 1);
+    if(mode==1)
         return;
-    int i = 1;
-    char* temp = &path[i];
-    i_node curr_inode = 0;//root inode
-    while(1){
-        if(path[i]=='/'){
-            path[i] = '\0';
-            curr_inode = find_file(curr_inode, temp);
-            uint32_t mode = read_inode_field(curr_inode, 1);
-            if(mode==1)
-                return;
-            temp = &path[i+1];
+    mode = read_inode_field(inode, 1);
+    uint32_t size = read_inode_field(inode, 2);
+    if(mode == 0 && size>0){
+        return;
+    }
+    else{
+        dentry_t dentries[20];
+        for(int c=0;c<20;c++)
+            dentries[c].inode = -1;
+        uint8_t* ptr = (uint8_t*)dentries;
+        clear_file(inode);
+        uint32_t parsize = read_inode_field(parent, 2);
+        for(int c=0;c<parsize;c++){
+            ptr[c] = read_file(parent,c);
         }
-        else if(path[i]=='\0'){
-            uint32_t parent_inode = curr_inode;
-            curr_inode = find_file(curr_inode, temp);
-            uint32_t mode = read_inode_field(curr_inode, 1);
-            uint32_t size = read_inode_field(curr_inode, 2);
-            if(mode == 0 && size>0){
-                return;
-            }
-            else{
-                dentry_t dentries[20];
-                for(int c=0;c<20;c++)
-                    dentries[c].inode = -1;
-                uint8_t* ptr = (uint8_t*)dentries;
-                clear_file(curr_inode);
-                uint32_t parsize = read_inode_field(parent_inode, 2);
-                for(int c=0;c<parsize;c++){
-                    ptr[c] = read_file(parent_inode,c);
+        clear_file(parent);
+        write_inode_field(inode, 0, 0);
+        for(int c=0;c<20;c++){
+            if(dentries[c].inode == -1)
+                break;
+            if(dentries[c].inode != inode){
+                ptr = (uint8_t*)&dentries[c];
+                for(int j=0;j<sizeof(dentry_t);j++){
+                    parsize = read_inode_field(parent, 2);
+                    write_file(parent, parsize, ptr[j]);
                 }
-                clear_file(parent_inode);
-                write_inode_field(curr_inode, 0, 0);
-                for(int c=0;c<20;c++){
-                    if(dentries[i].inode == -1)
-                        break;
-                    if(dentries[i].inode != curr_inode){
-                        ptr = (uint8_t*)&dentries[i];
-                        for(int j=0;j<sizeof(dentry_t);j++){
-                            parsize = read_inode_field(parent_inode, 2);
-                            write_file(parent_inode, parsize, ptr[j]);
-                        }
-                    }
-                }      
             }
-            return;
         }
-        i++;
     }
 }
 
@@ -475,6 +454,16 @@ void setGlobalEntry(global_table* t, int globalID, i_node inode, file_type type)
     t->entries[globalID].wqread.head  = 0;
     t->entries[globalID].wqread.tail  = 0;
     t->entries[globalID].wqread.len   = 0;
+}
+
+int find_globalID_by_inode(global_table* t, i_node inode){
+    int i;
+    for(i = 0;i<MAXGLOBAL;i++){
+        if(t->entries[i].active && t->entries[i].inode == inode){
+            return t->entries[i].globalID;
+        }
+    }
+    return -1;
 }
 
 void enqueue_wq(global_table* t, int globalID, int queue, int pid){
