@@ -18,20 +18,30 @@ void P0() {
   int x = 0;
   char s[20];
   while( 1 ) {
-    // test whether each x for 2^8 < x < 2^24 is prime or not
-    //int chars = read_line(s,20);
-    //printF("Characters read: %d\n", chars);
-    //printF("Input text: %s\n",s);
+    //file1
     int r = creat("/file1");
     printF("File created: %d\n",r);
     int fd = open("/file1",READ_WRITE);
-    char* x = "THIS SENTENCE IS MORE THAN 16 BYTES. YES IT IS";
+    char* x = "tHIS SENTENCE IS MORE THAN 16 BYTES. YES IT IS";
     write(fd, x, 47);
     lseek(fd, 0, SEEK_SET);
-    char c = 'g';
+    char c = 'T';
     write(fd, &c, 1);
+    lseek(fd, 0, SEEK_SET);
+    read(fd, x, 4);
     close(fd);
-    unlink("/file1");
+    //file2
+    creat("/file2");
+    fd = open("/file2",READ_WRITE);
+    write(fd, x, 47);
+    lseek(fd, 0, SEEK_SET);
+    close(fd);
+    //clearing and rewriting to file 1
+    fd = open("/file1",READ_WRITE|CLEAR_FILE);
+    write(fd, x, 4);
+    close(fd);
+    //unlink test
+    unlink("/file2");
     for( uint32_t x = ( 1 << 8 ); x < ( 1 << 24 ); x++ ) {
       int r = is_prime( x ); printF( "is_prime( %d ) = %d\n", x, r );
     }

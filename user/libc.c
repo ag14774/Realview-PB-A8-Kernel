@@ -232,6 +232,61 @@ int lseek(int fd, int offset, int whence){
     return r;
 }
 
+int mkdir(char* path){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "svc #20    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (path)
+                : "r0" );
+    return r;
+}
+
+int rmdir(char* path){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "svc #21    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (path)
+                : "r0" );
+    return r;
+}
+
+int getcwd(char* buff){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "svc #22    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (buff)
+                : "r0" );
+    return r;
+}
+
+int getdents(char* buff){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "svc #23    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (buff)
+                : "r0" );
+    return r;
+}
+
+int chdir(char* path){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "svc #24    \n"
+                  "mov %0, r0 \n"
+                : "=r" (r)
+                : "r" (path)
+                : "r0" );
+    return r;
+}
+
 int read_line(char b[], size_t array_size){
   int chars = 0;
   if(array_size > 500)

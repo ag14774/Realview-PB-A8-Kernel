@@ -241,6 +241,7 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   pcb_t* p = find_pid_ht(ht_ptr, temp);
   __open(p, 0, -1, stdio, -1, READ_ONLY|KEEP_ON_EXEC);
   __open(p, 1, -1, stdio, -1, WRITE_ONLY|KEEP_ON_EXEC);
+  p->cwd_inode = 0;
   schedule(temp);
 
   if(load_sb())
@@ -675,84 +676,104 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       char*  path0   = (char * ) ctx->gpr[0];
       char path[100];
       path[0]='\0';
+      int start = 0;
+      if(path0[0]!='/'){
+        start = current->cwd_inode;
+        strcat(path, "./"); 
+      }
       strcat(path, path0);
       char*  lastslash = path;
-      if(path[0]=='/'){ //absolute path
-        int i = 0;
-        for(i=0;path[i]!='\0';i++){
-            if(path[i]=='/'){
-                lastslash = &path[i];
-            }
-        }
-        *lastslash = '\0';
-        i_node parent_inode = parse_path(path);
-        if(parent_inode == -1){
-            ctx->gpr[0] = -1;
-        }
-        else{
-
-            create_dentry(parent_inode, ++lastslash, 0);
-            ctx->gpr[0] = 0;
+      int i = 0;
+      for(i=0;path[i]!='\0';i++){
+        if(path[i]=='/'){
+            lastslash = &path[i];
         }
       }
-      else{
+      *lastslash = '\0';
+      i_node parent_inode = parse_path(path, start);
+      if(parent_inode == -1){
         ctx->gpr[0] = -1;
+      }
+      else{
+        create_dentry(parent_inode, ++lastslash, 0, -1);
+        ctx->gpr[0] = 0;
       }
       break;
     }
-    case 0x11 : { //int fd = open(path,flags) only read, write, or readwrite flags
+    case 0x11 : { //int fd = open(path,flags)
       char* path0 = (char*) ctx->gpr[0];
       char path[100];
       path[0]='\0';
+      int start = 0;
+      if(path0[0]!='/'){
+        start = current->cwd_inode;
+        strcat(path, "./");
+      }
       strcat(path, path0);
       int  flags = (int  ) ctx->gpr[1];
-      if(path[0]=='/'){//absolute path
-        i_node inode = parse_path(path);
-        if(inode == -1){
-            ctx->gpr[0] = -1;
-            break;
-        }
-        ctx->gpr[0] = __open(current, -1, -1, file, inode, flags);
+
+      i_node inode = parse_path(path, start);
+      if(inode == -1){
+          ctx->gpr[0] = -1;
+          break;
       }
-      else{ //relative paths not supported
-        ctx->gpr[0] = -1;
+      uint32_t used = read_inode_field(inode, 0);
+      if(!used){
+          ctx->gpr[0] = -1;
+          break;
       }
+      uint32_t mode = read_inode_field(inode, 1);
+      if(mode == 0){
+          ctx->gpr[0] = -1;
+          break;
+      }
+      if((0xf000&flags) == CLEAR_FILE){
+          clear_file(inode);
+      }
+      ctx->gpr[0] = __open(current, -1, -1, file, inode, flags);
       break;
     }
     case 0x12 : { //unlink(char* path)
       char*  path0   = (char * ) ctx->gpr[0];
       char path[100];
       path[0]='\0';
+      int start = 0;
+      if(path0[0]!='/'){
+        start = current->cwd_inode;
+        strcat(path, "./"); 
+      }
       strcat(path, path0);
       char* lastslash = path;
-      if(path[0]=='/'){ //absolute path
-        int i = 0;
-        for(i=0;path[i]!='\0';i++){
-            if(path[i]=='/'){
-                lastslash = &path[i];
-            }
-        }
-        *lastslash = '\0';
-        i_node parent_inode = parse_path(path);
-        if(parent_inode == -1){
-            ctx->gpr[0] = -1;
-        }
-        else{
-            i_node inode = find_file(parent_inode, ++lastslash);
-            int globalID = find_globalID_by_inode(filetable_ptr, inode);
-            if(globalID == -1){
-                delete_dentry(parent_inode, inode);
-            }
-            else{
-                filetable_ptr->entries[globalID].deleteRequested = 1;
-                filetable_ptr->entries[globalID].parent_inode = parent_inode;
-            }
-            ctx->gpr[0] = 0;
-        }
+
+      int i = 0;
+      for(i=0;path[i]!='\0';i++){
+          if(path[i]=='/'){
+              lastslash = &path[i];
+          }
+      }
+      *lastslash = '\0';
+      i_node parent_inode = parse_path(path, start);
+      if(parent_inode == -1){
+          ctx->gpr[0] = -1;
+          break;
+      }
+
+      i_node inode = find_file(parent_inode, ++lastslash);
+      uint32_t mode = read_inode_field(inode, 1);
+      if(mode == 0){
+          ctx->gpr[0] = -1;
+          break;
+      }
+      int globalID = find_globalID_by_inode(filetable_ptr, inode);
+      if(globalID == -1){
+          delete_dentry(parent_inode, inode);
       }
       else{
-        ctx->gpr[0] = -1;
+          filetable_ptr->entries[globalID].deleteRequested = 1;
+          filetable_ptr->entries[globalID].parent_inode = parent_inode;
       }
+      ctx->gpr[0] = 0;
+
       break;
     }
     case 0x13 : { //int lseek(fd, offset, whence)
@@ -785,6 +806,152 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
         }
         ctx->gpr[0] = fentry->rwpointer;
         break;
+    }
+    case 0x14 : { //mkdir(char* path)
+      char*  path0   = (char * ) ctx->gpr[0];
+      char path[100];
+      path[0]='\0';
+      int start = 0;
+      if(path0[0]!='/'){
+        start = current->cwd_inode;
+        strcat(path, "./"); 
+      }
+      strcat(path, path0);
+      char*  lastslash = path;
+
+      int i = 0;
+      for(i=0;path[i]!='\0';i++){
+          if(path[i]=='/'){
+              lastslash = &path[i];
+          }
+      }
+      *lastslash = '\0';
+      i_node parent_inode = parse_path(path, start);
+      if(parent_inode == -1){
+          ctx->gpr[0] = -1;
+      }
+      else{
+          ctx->gpr[0] = create_dentry(parent_inode, ++lastslash, 1, -1);
+      }
+
+      break;
+    }
+    case 0x15 : { //rmdir(char* path)
+      char*  path0   = (char * ) ctx->gpr[0];
+      char path[100];
+      path[0]='\0';
+      int start = 0;
+      if(path0[0]!='/'){
+        start = current->cwd_inode;
+        strcat(path, "./"); 
+      }
+      strcat(path, path0);
+      char* lastslash = path;
+
+      int i = 0;
+      for(i=0;path[i]!='\0';i++){
+          if(path[i]=='/'){
+              lastslash = &path[i];
+          }
+      }
+      *lastslash = '\0';
+      i_node parent_inode = parse_path(path, start);
+      if(parent_inode == -1){
+          ctx->gpr[0] = -1;
+          break;
+      }
+
+      i_node inode = find_file(parent_inode, ++lastslash);
+      uint32_t mode = read_inode_field(inode, 1);
+      if(mode == 1){
+          ctx->gpr[0] = -1;
+          break;
+      }
+      ctx->gpr[0] = delete_dentry(parent_inode, inode);
+
+      break;
+    }
+    case 0x16 : { //int getcwd(char* buff) PROBABLY SLOW. IMPROVE THIS
+      char* buff = (char*) ctx->gpr[0];
+      buff[0] = '\0';
+      i_node curr = current->cwd_inode;
+      char temp[12];
+      temp[0] = '\0';
+      char temp2[100];
+      temp2[0] = '\0';
+      int res = 0;
+      while(1){
+        i_node up = find_file(curr,"..");
+        if(up == curr){
+            break;
+        }
+        res = find_file_by_inode(up, curr, temp);
+        if(res==-1)
+            break;
+        curr = up;
+        temp2[0] = '\0';
+        strcat(temp2, buff);
+        buff[0] = '/';
+        buff[1] = '\0';
+        strcat(buff, temp);
+        temp[0]='\0';
+        strcat(buff, temp2);
+      }
+      if(res==-1){
+        ctx->gpr[0] = -1;
+        break;
+      }
+      if(buff[0]!='/'){
+        temp2[0]='\0';
+        strcat(temp2,buff);
+        buff[0]='/';
+        buff[1]='\0';
+        strcat(buff, temp2);
+      }
+      ctx->gpr[0] = 0;
+      break;
+    }
+    case 0x17 : { //int getdents(char* buff)
+      char* buff = (char*) ctx->gpr[0];
+      buff[0] = '\0';
+      dentry_t dentries[20];
+      uint8_t* ptr = (uint8_t*)dentries;
+      uint32_t parsize = read_inode_field(current->cwd_inode, 2);
+      for(int c=0;c<parsize;c++){
+        ptr[c] = read_file(current->cwd_inode,c);
+      }
+      for(int c=0;c<parsize/sizeof(dentry_t);c++){
+        strcat(buff,dentries[c].name);
+        strcat(buff,"|");
+      }
+      ctx->gpr[0] = parsize/sizeof(dentry_t);
+      break;
+    }
+    case 0x18 : { //int chdir(char* path)
+      char*  path0   = (char * ) ctx->gpr[0];
+      char path[100];
+      path[0]='\0';
+      int start = 0;
+      if(path0[0]!='/'){
+        start = current->cwd_inode;
+        strcat(path, "./"); 
+      }
+      strcat(path, path0);
+
+      i_node inode = parse_path(path, start);
+      if(inode == -1){
+          ctx->gpr[0] = -1;
+          break;
+      }
+      uint32_t mode = read_inode_field(inode, 1);
+      if(mode == 1){
+           ctx->gpr[0] = -1;
+           break;
+      }
+      current->cwd_inode = inode;
+      ctx->gpr[0] = 0;
+
+      break;
     }
     default   : { // unknown
       break;

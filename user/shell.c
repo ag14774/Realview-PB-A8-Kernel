@@ -175,13 +175,18 @@ void shell() {
     char line[50];
     char* argbuff[50];
 
-    char *cmd_list[5];
-    cmd_list[0] = "bg";
-    cmd_list[1] = "exec";
-    cmd_list[2] = "fg";
-    cmd_list[3] = "help";
-    cmd_list[4] = "nice";
-    cmd_list[5] = "ps";
+    char *cmd_list[15];
+    cmd_list[0]  = "bg";
+    cmd_list[1]  = "cd";
+    cmd_list[2]  = "exec";
+    cmd_list[3]  = "fg";
+    cmd_list[4]  = "help";
+    cmd_list[5]  = "ls";
+    cmd_list[6]  = "mkdir";
+    cmd_list[7]  = "nice";
+    cmd_list[8]  = "ps";
+    cmd_list[9]  = "pwd";
+    cmd_list[10] = "rmdir";
 
     printF("\n  ___   _  _   ___   _      _    \n");
     printF(" / __| | || | | __| | |    | |   \n");
@@ -204,8 +209,16 @@ void shell() {
                     //printF("Not Implemented\n");
                     break;
                 }
-            case 'e':
+            case 'c':
                 if(strcmp(cmd,cmd_list[1]) == 0){
+                    int res = chdir(argbuff[1]);
+                    if(res != 0){
+                        printF("An error occurred!\n");
+                    }
+                    break;
+                }
+            case 'e':
+                if(strcmp(cmd,cmd_list[2]) == 0){
                     int i = 1;
                     int j = 1;
                     int firstpid = 0;
@@ -260,28 +273,74 @@ void shell() {
                     break;
                 }
             case 'f':
-                if(strcmp(cmd,cmd_list[2]) == 0){
+                if(strcmp(cmd,cmd_list[3]) == 0){
                     int proc_pid = string2int(argbuff[1]);
                     waitpid(proc_pid);
                     //printF("Not Implemented\n");
                     break;
                 }
             case 'h':
-                if(strcmp(cmd,cmd_list[3]) == 0){
+                if(strcmp(cmd,cmd_list[4]) == 0){
                     help();
                     break;
                 }
+            case 'l':
+                if(strcmp(cmd,cmd_list[5]) == 0){
+                    char buff[200];
+                    int res = getdents(buff);
+                    int count = 0;
+                    char* dir = buff;
+                    for(int i=0;buff[i]!='\0';i++){
+                        if(buff[i] == '|'){
+                            count++;
+                            buff[i] = '\0';
+                            printF("%s\n",dir);
+                            if(count == res)
+                                break;
+                            dir = &buff[i+1];
+                        }
+                    }
+                    break;
+                }
+            case 'm':
+                if(strcmp(cmd,cmd_list[6]) == 0){
+                    int res = mkdir(argbuff[1]);
+                    if(res != 0){
+                        printF("An error occurred!\n");
+                    }
+                    break;
+                }
             case 'n':
-                if(strcmp(cmd,cmd_list[4]) == 0){
+                if(strcmp(cmd,cmd_list[7]) == 0){
                     int proc_pid = string2int(argbuff[1]);
                     int priority = string2int(argbuff[2]);
                     nice(proc_pid, priority);
                     break;
                 }
             case 'p':
-                if(strcmp(cmd,cmd_list[5]) == 0){
+                if(strcmp(cmd,cmd_list[8]) == 0){
                     ps();
                     //printF("Not Implemented\n");
+                    break;
+                }
+                else if(strcmp(cmd, cmd_list[9]) == 0){
+                    char buff[100];
+                    buff[0] = '\0';
+                    int r = getcwd(buff);
+                    if(r==0){
+                        printF("%s\n",buff);
+                    }
+                    else{
+                        printF("An error occurred!\n");
+                    }
+                    break;
+                }
+            case 'r':
+                if(strcmp(cmd,cmd_list[10]) == 0){
+                    int res = rmdir(argbuff[1]);
+                    if(res != 0){
+                        printF("An error occurred!\n");
+                    }
                     break;
                 }
             default: {

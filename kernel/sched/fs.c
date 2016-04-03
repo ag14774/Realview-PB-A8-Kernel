@@ -106,6 +106,8 @@ i_node get_free_block(){
 
 //should also update active inode table if there is an entry
 void write_file(i_node inode, uint32_t offset, uint8_t b){
+    if(offset>=max_file_size)
+        return;
     uint32_t active = read_inode_field(inode, 0);
     if(!active)
         return;
@@ -183,6 +185,30 @@ i_node find_file(i_node parent, const char* name){
     return -1;
 }
 
+int find_file_by_inode(i_node parent, i_node find, char* name){//name will hold the name of inode found
+    uint32_t parent_used = read_inode_field(parent, 0);
+    if(!parent_used)
+        return -1;
+    uint32_t parent_mode = read_inode_field(parent, 1);
+    if(parent_mode != 0)
+        return -1;
+    uint32_t size = read_inode_field(parent, 2);
+    dentry_t dentry;
+    uint8_t* ptr = (uint8_t*)&dentry;
+    int i = 0;
+    int j = 0;
+    while(i<size){
+        ptr[j] = read_file(parent, i);
+        i++;
+        j = (j+1)%sizeof(dentry_t);
+        if(j==0 && dentry.inode == find){
+            memcpy(name, dentry.name, 12);//replace with sizeof(dentry.name);
+            return 0;
+        }
+    }
+    return -1;
+}
+
 void clear_file(i_node inode){
     uint32_t used = read_inode_field(inode, 0);
     if(!used)
@@ -197,14 +223,14 @@ void clear_file(i_node inode){
     write_inode_field(inode, 2, 0);
 }
 
-void delete_dentry(i_node parent, i_node inode){
+int delete_dentry(i_node parent, i_node inode){
     uint32_t mode = read_inode_field(parent, 1);
     if(mode==1)
-        return;
+        return -1;
     mode = read_inode_field(inode, 1);
     uint32_t size = read_inode_field(inode, 2);
-    if(mode == 0 && size>0){
-        return;
+    if(mode == 0 && size>2*sizeof(dentry_t) || inode == 0){ //if it has more than 2 dir_entries(.. and .), do not remove
+        return -1;
     }
     else{
         dentry_t dentries[20];
@@ -230,39 +256,58 @@ void delete_dentry(i_node parent, i_node inode){
             }
         }
     }
+    return 0;
 }
 
-void create_dentry(i_node parent, const char* name, int dir){
+int create_dentry(i_node parent, const char* name, int dir, i_node inode){
+    if(name[0]=='\0')
+        return -1;
     uint32_t parent_used = read_inode_field(parent, 0);
     if(!parent_used)
-        return;
+        return -1;
     uint32_t parent_mode = read_inode_field(parent, 1);
     if(parent_mode != 0)//not a directory
-        return;
+        return -1;
     if(find_file(parent, name)!=-1)
-        return; //already exists
+        return -1; //already exists
+    uint32_t mode;
     dentry_t dentry;
-    dentry.inode = get_free_inode();
     if(dir)
-        write_inode_field(dentry.inode, 1, 0);
+        mode = 0;
     else
-        write_inode_field(dentry.inode, 1 ,1);
+        mode = 1;
+    if(inode >= 0){
+        uint32_t used = read_inode_field(inode, 0);
+        if(!used)
+            return -1;
+        mode = read_inode_field(inode, 1);
+        dentry.inode = inode;
+    }
+    else{
+        dentry.inode = get_free_inode();
+    }
+    write_inode_field(dentry.inode, 1 ,mode);
     memcpy(dentry.name,name,12);
     uint8_t* ptr = (uint8_t*)&dentry;
     for(int i=0;i<sizeof(dentry_t);i++){
         uint32_t size = read_inode_field(parent,2);
         write_file(parent, size, ptr[i]);
     }
+    if(mode == 0 && inode<0){
+        create_dentry(dentry.inode, "." , 1, dentry.inode);
+        create_dentry(dentry.inode, "..", 1, parent);
+    }
+    return 0;
 }
 
-i_node parse_path(char* path){
+i_node parse_path(char* path, i_node start){
     if(path[0]=='\0')
         return 0;//root
-    if(path[0]!='/')
-        return -1;
     int i = 1;
+    if(path[0]!='/')
+        i = 0;
     char* temp = &path[i];
-    i_node curr_inode = 0;//root inode
+    i_node curr_inode = start;//root inode
     while(1){
         if(path[i]=='/'){
             path[i] = '\0';
@@ -712,6 +757,9 @@ void format_disk(){
     i_node root = get_free_inode();
     if(root != 0)
         return; //THIS SHOULD BE 0
+        
+    create_dentry(0, "." , 1, 0);
+    create_dentry(0, "..", 1, 0);
     
     empty_cache();
 

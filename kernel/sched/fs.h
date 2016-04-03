@@ -137,11 +137,12 @@ i_node get_free_block();
 void write_file(i_node inode, uint32_t offset, uint8_t b);
 uint8_t read_file(i_node inode, uint32_t offset);
 void clear_file(i_node inode);
-void delete_dentry(i_node parent, i_node inode);
-void create_dentry(i_node parent, const char* name, int dir);
+int delete_dentry(i_node parent, i_node inode);
+int create_dentry(i_node parent, const char* name, int dir, i_node inode);
+int getdentries(i_node parent, dentry_t* arr);
 i_node find_file(i_node parent, const char* name);
-i_node parse_path(char* path);
+int find_file_by_inode(i_node parent, i_node find, char* name);//name will hold the name of inode found
+i_node parse_path(char* path, i_node start);
 void clear_file_cache(i_node inode);
-
 
 #endif

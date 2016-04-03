@@ -11,15 +11,18 @@
 
 #define MAXFD 15
 
-#define READ_ONLY 0x001
-#define WRITE_ONLY 0x002
-#define READ_WRITE 0x003
+#define READ_ONLY 0x0001
+#define WRITE_ONLY 0x0002
+#define READ_WRITE 0x0003
 
-#define CLOSE_ON_EXEC 0x010
-#define KEEP_ON_EXEC  0x000
+#define CLOSE_ON_EXEC 0x0010
+#define KEEP_ON_EXEC  0x0000
 
-#define KEEP_ON_EXIT  0x100
-#define CLOSE_ON_EXIT 0x000
+#define KEEP_ON_EXIT  0x0100
+#define CLOSE_ON_EXIT 0x0000
+
+#define KEEP_FILE  0x0000
+#define CLEAR_FILE 0x1000
 
 /* The kernel source code is made simpler by three type definitions:
  *
@@ -88,6 +91,7 @@ typedef struct pcb_t {
   proc_state_t proc_state;
   block_info_t block_info;
   fdtable_t fdtable;
+  int cwd_inode;
   uint8_t priority; //1(highest)-20
   uint32_t vruntime; //vruntime = vruntime + priority
   int queue_index;
