@@ -20,17 +20,19 @@ void unblock_by_pid(pid_t pid){
     if(p->proc_state == BLOCKED){
         int operation  = p->block_info.operation;
         int globalID   = p->fdtable.fd[p->block_info.fd].globalID;
-        file_type type = filetable_ptr->entries[globalID].type;
-        switch(type){
-            case stdio: //nothing to do here
-                break;
-            case pipe:
-                remove_wq(filetable_ptr, globalID, operation, pid);
-                break;
-            case file:
-                break;
-            default:
-                break;
+        if(operation>=0 && globalID>=0){
+            file_type type = filetable_ptr->entries[globalID].type;
+            switch(type){
+                case stdio: //nothing to do here
+                    break;
+                case pipe:
+                    remove_wq(filetable_ptr, globalID, operation, pid);
+                    break;
+                case file: //nohing to do here
+                    break;
+                default:
+                    break;
+            }
         }
         p->proc_state = WAITING;
     }

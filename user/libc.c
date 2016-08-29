@@ -287,6 +287,40 @@ int chdir(char* path){
     return r;
 }
 
+void sync(int fd){
+    asm volatile( "mov r0, %0 \n"
+                  "svc #25    \n"
+                :
+                : "r" (fd)
+                : "r0" );
+}
+
+int select(int* fds, int n){
+    int r;
+    asm volatile( "mov r0, %1 \n"
+                  "mov r1, %2 \n"
+                  "svc #26    \n"
+                  "mov %0, r0 \n"
+                : "=r"(r)
+                : "r" (fds), "r" (n)
+                : "r0", "r1" );
+   
+   return r;
+}
+
+void simkey(char c){
+    asm volatile( "mov r0, %0 \n"
+                  "svc #27    \n"
+                : 
+                : "r" (c)
+                : "r0");
+
+}
+
+void clear_cache(){
+    asm volatile( "svc #28 \n" );
+}
+
 int read_line(char b[], size_t array_size){
   int chars = 0;
   if(array_size > 500)
@@ -308,7 +342,7 @@ int read_line(char b[], size_t array_size){
 int printF(const char* f, ...){
     va_list args;      //Define a list of variables
     int done, num;     //'num' is used to temporarily store integer arguments
-    char buffer[500];  //Final message stored here
+    char buffer[1500];  //Final message stored here
     char intbuff[15];  //String version of integer argument
     char *s;           //Used as a pointer to intbuff
     size_t len;

@@ -15,7 +15,7 @@
 #define PIPESIZE  500
 #define PIPE_WQ   15
 
-#define MAX_DIRECT_BLOCKS 15
+#define MAX_DIRECT_BLOCKS 63
 #define MAX_BLOCK_SIZE 128
 #define CACHE_SIZE 128
 #define CACHE_BUCKET 5
@@ -56,8 +56,16 @@ typedef struct{
 } wait_queue;
 
 typedef struct{
+    int pid1;
+    int pid2;
+    char flag; //sync sets this to 1
+    char flag2;
+}sync_data;
+
+typedef struct{
     i_node inode;
     char buff[PIPESIZE];
+    sync_data sync;
     int readptr;
     int writeptr;
     int len;
@@ -91,6 +99,7 @@ typedef struct cache_entry{
     uint8_t active;
     uint32_t block_addr;
     uint8_t data[MAX_BLOCK_SIZE];
+    uint8_t dirty;
     struct cache_entry* next;
     struct cache_entry* prev;
 } cache_entry;
@@ -101,9 +110,10 @@ typedef struct{
     cache_entry* tail;
 } cache_ht;
 
+
 int get_global_entry(global_table* t, int globalID); //if globalID negative, then return the first that is free
 void setGlobalEntry(global_table* t, int globalID, i_node inode, file_type type);
-int find_globalID_by_inode(global_table* t, i_node inode);
+int find_globalID_by_inode(global_table* t, i_node inode, file_type type);
 void enqueue_wq(global_table* t, int globalID, int queue, int pid); //queue 0 is write, read otherwise
 void remove_wq(global_table* t, int globalID, int queue, int pid);
 int dequeue_wq(global_table* t, int globalID, int queue); //queue 0 is write, read otherwise. return 0 if empty;
@@ -117,6 +127,9 @@ char consume_pipe(pipes_t* pipes, i_node inode);
 int isPipeEmpty(pipes_t* pipes, i_node inode);
 int isPipeFull(pipes_t* pipes, i_node inode);
 void close_pipe(pipes_t* pipes, i_node inode);
+void insertSyncPid(pipes_t* pipes, i_node inode, int pid);
+void clearSyncPid(pipes_t* pipes, i_node inode, int pid);
+int getOtherSyncPid(pipes_t* pipes, i_node inode, int pid);
 
 void empty_cache();
 void empty_cache_block(uint32_t block_addr, int write2disk);

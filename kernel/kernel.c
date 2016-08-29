@@ -9,6 +9,8 @@
  *   can be created, and neither is able to complete.
  */
 
+#define PRINTPIDS 0
+
 extern pcb_t *current;
 extern hashtable_t* ht_ptr;
 extern input_buff* ib_ptr;
@@ -158,7 +160,7 @@ int __open(pcb_t* p, int fd, int globalID, file_type type, i_node inode, int fla
             filetable_ptr->entries[globalID].refcount++;
             break;
         case file:
-            globalID = find_globalID_by_inode(filetable_ptr, inode);
+            globalID = find_globalID_by_inode(filetable_ptr, inode, file);
             if(globalID == -1){
                 globalID = get_global_entry(filetable_ptr, -1);
                 setGlobalEntry(filetable_ptr, globalID, inode, type); //connect globalID with pipe
@@ -234,6 +236,13 @@ void kernel_handler_rst( ctx_t* ctx              ) {
   programs[5].entry = (uint32_t)entry_P3;
   programs[6].name  = "shell";
   programs[6].entry = (uint32_t)entry_shell;
+  programs[7].name  = "Dining";
+  programs[7].entry = (uint32_t)entry_Dining;
+  programs[8].name  = "grep";
+  programs[8].entry = (uint32_t)entry_grep;
+  programs[9].name  = "edit";
+  programs[9].entry = (uint32_t)entry_edit;
+  
 
   initialise_scheduler((uint32_t)&tos_irq);
   
@@ -284,7 +293,6 @@ void kernel_handler_irq( ctx_t* ctx ) {
       int ready = process_char(ib_ptr,c);
       if(ready){
         unblock_by_pid(ib_ptr->pid);
-        //scheduler( ctx );//not sure if this should be here
       }
       UART0->ICR = 0x10;
       break;
@@ -330,7 +338,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           char*  x = ( char* )( ctx->gpr[ 1 ] );  
           int    n = ( int   )( ctx->gpr[ 2 ] );
           pid_t pid = current->pid;
-          if(pid>1){
+          if(pid>1 && PRINTPIDS){
             PL011_puth(UART0, pid);
             PL011_putc(UART0, ':');
             PL011_putc(UART0, ' ');
@@ -353,7 +361,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           for(i=0;i<n;i++){
             if(isPipeFull(pipes_ptr, pentry->inode)){
               ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
-              ctx->gpr[1] = ctx->gpr[1] + i*sizeof(int);
+              ctx->gpr[1] = ctx->gpr[1] + i*sizeof(char);
               ctx->gpr[2] = ctx->gpr[2] - i;
               pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1);
               setBlockInfo(current, BLOCKED, fd, 0);
@@ -368,7 +376,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
               ctx->gpr[3] = ctx->gpr[3] + 1;
             }
           }
-          if(i!=n)
+          if(i!=n) //if for loop was broken
             break;
           pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1); //is anyone available to read what I've just written?
           if(unblock_next<=0)
@@ -464,7 +472,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           for(i=0;i<n;i++){
             if(isPipeEmpty(pipes_ptr, pentry->inode)){
               ctx->pc = ctx->pc - 0x4; //correct address so next time the process unblocks, it will try again
-              ctx->gpr[1] = ctx->gpr[1] + i*sizeof(int);
+              ctx->gpr[1] = ctx->gpr[1] + i*sizeof(char);
               ctx->gpr[2] = ctx->gpr[2] - i;
               pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 0);
               setBlockInfo(current, BLOCKED, fd, 1);
@@ -479,7 +487,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
               ctx->gpr[3] = ctx->gpr[3] + 1;
             }
           }
-          if(i!=n)
+          if(i!=n) //If for loop was broken
             break;
           pid_t unblock_next = dequeue_wq(filetable_ptr, gentry->globalID, 1); //is anyone available to read some more?
           if(unblock_next<=0)
@@ -506,8 +514,11 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x05 : { //waitpid(int pid) if pid is not in the queue, add it.
       int pid = (int)(ctx->gpr[0]);
-      if(find_pid_ht(ht_ptr,pid)==NULL)
-          break;
+      pcb_t* temp = find_pid_ht(ht_ptr,pid);
+      if(temp==NULL)
+        break;
+      //if(temp->proc_state == BLOCKED)
+      //  break;
       __ioctl(current->pid,pid);
       proc_state_t reason;
       if(current->pid == pid) //waiting for self. that means block
@@ -596,15 +607,20 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       int pid    = (int) ctx->gpr[0];
       int signal = (int) ctx->gpr[1];
       switch(signal){
-        case SIGCONT:
-            if(find_pid_ht(ht_ptr,pid)==NULL)
+        case SIGCONT:{
+            pcb_t* temp = find_pid_ht(ht_ptr,pid);
+            if(temp==NULL)
                 break;
+            //if(temp->proc_state == BLOCKED)
+            //    break;
             unblock_by_pid(pid);//if it is blocked
             //scheduler( ctx );
             break;
-        case SIGTERM:
+        }
+        case SIGTERM:{
             __exit(ctx, 1, pid);
             break;
+        }
         default:
             break;
       }
@@ -695,8 +711,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
         ctx->gpr[0] = -1;
       }
       else{
-        create_dentry(parent_inode, ++lastslash, 0, -1);
-        ctx->gpr[0] = 0;
+        ctx->gpr[0] = create_dentry(parent_inode, ++lastslash, 0, -1);
       }
       break;
     }
@@ -764,7 +779,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           ctx->gpr[0] = -1;
           break;
       }
-      int globalID = find_globalID_by_inode(filetable_ptr, inode);
+      int globalID = find_globalID_by_inode(filetable_ptr, inode, file);
       if(globalID == -1){
           delete_dentry(parent_inode, inode);
       }
@@ -951,6 +966,109 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       current->cwd_inode = inode;
       ctx->gpr[0] = 0;
 
+      break;
+    }
+    case 0x19 : { //sync(fd) should only be used when a pipe is used by 2 processes ONLY
+      int fd = (int)(ctx->gpr[0]);
+      fd_entry* fentry = &current->fdtable.fd[fd];
+      if(!fentry->active){
+        break;
+      }
+      global_entry* gentry = &filetable_ptr->entries[fentry->globalID];
+      if(!gentry->active){
+        break;
+      }
+      switch(gentry->type){
+        case stdio : {
+          break;
+        }
+        case pipe : {
+          pipe_t* pentry = &pipes_ptr->p[gentry->inode];
+          if(!pentry->active){
+            break;
+          }
+          insertSyncPid(pipes_ptr, gentry->inode, current->pid);
+          if(pentry->sync.flag2 == 0){
+            setBlockInfo(current, BLOCKED, -1, -1);
+            ctx->pc = ctx->pc - 0x4;
+            pentry->sync.flag = 1;
+            pid_t other = getOtherSyncPid(pipes_ptr, gentry->inode, current->pid);
+            if(other>0){
+                unblock_by_pid(other);
+            }
+            scheduler(ctx);
+          }else{
+            pentry->sync.flag2 = 0;
+            pid_t other = getOtherSyncPid(pipes_ptr, gentry->inode, current->pid);
+            if(other>0){
+                unblock_by_pid(other);
+            }
+          }
+          break; 
+        } 
+        case file : {
+          break;
+        }
+      }
+      break;
+    }
+    case 0x1A : { //int fd = select(fd[n], int n)
+      int* fds = (int*) ctx->gpr[0];
+      int    n = (int ) ctx->gpr[1];
+      int fd_ready = -1;
+      int index = 0;
+      for(int i = 0;i<n && fd_ready==-1;i++){
+          fd_entry* fentry = &current->fdtable.fd[fds[i]];
+          if(!fentry->active){
+            continue;
+          }
+          global_entry* gentry = &filetable_ptr->entries[fentry->globalID];
+          if(!gentry->active){
+            continue;
+          }
+          switch(gentry->type){
+            case stdio:
+                break;
+            case pipe:{
+                pipe_t* pentry = &pipes_ptr->p[gentry->inode];
+                if(!pentry->active){
+                    break;
+                }
+                insertSyncPid(pipes_ptr, gentry->inode, current->pid);
+                if(pentry->sync.flag == 1){
+                    fd_ready = fds[i];
+                    index = i;
+                    pentry->sync.flag  = 0;//maybe reset only when empty?
+                    pentry->sync.flag2 = 1;
+                    pid_t other = getOtherSyncPid(pipes_ptr, gentry->inode, current->pid);
+                    if(other>0){
+                        unblock_by_pid(other);
+                    }
+                }
+                break;
+            }
+            case file:
+                break;
+          }
+      }
+      if(fd_ready>=0){
+        ctx->gpr[0] = index;
+      }
+      else{
+        setBlockInfo(current, BLOCKED, -1, -1);
+        ctx->pc = ctx->pc - 0x4;
+        scheduler(ctx);
+      }
+      break;
+    }
+    case 0x1B : { //simkey(char c)
+      char c = (char) ctx->gpr[0];
+      process_char_stdout(c);
+      process_char(ib_ptr,c);
+      break;
+    }
+    case 0x1C : { //clear_cache()
+      empty_cache();
       break;
     }
     default   : { // unknown

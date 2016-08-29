@@ -9,7 +9,7 @@
 #include "SP804.h"
 
 #include "interrupt.h"
-#include "sched/scheduler.h"
+#include "other/scheduler.h"
 
 // Include functionality from newlib, the embedded standard C library.
 
@@ -24,6 +24,9 @@
 #include "genPrimes.h"
 #include "testPipe.h"
 #include "P3.h"
+#include "Dining.h"
+#include "grep.h"
+#include "edit.h"
 
 #define SIGCONT 0xA0
 #define SIGTERM 0xA1

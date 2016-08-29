@@ -92,4 +92,13 @@ int getcwd(char* buff);
 int getdents(char* buff);
 
 int chdir(char* path);
+
+void sync(int fd);
+
+int select(int* fds, int n);
+
+void simkey(char c);
+
+void clear_cache();
+
 #endif

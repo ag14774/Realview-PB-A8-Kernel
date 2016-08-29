@@ -89,7 +89,7 @@ int s2int(char* s){
 int main(int argc, char** argv){
     uint n;
     n = s2int(argv[1]);
-    uint array[1024];
+    uint array[200];
     SpawnArray(n, array);
     del(array,n);
     printArray(array,n);

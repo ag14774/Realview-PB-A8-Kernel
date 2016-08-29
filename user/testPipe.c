@@ -1,7 +1,6 @@
-#include "P2.h"
+#include "testPipe.h"
 
 void child( int fd ) {
-  fork();
   int buff[20];
   while(1){
     int r = read(fd, buff, 1);

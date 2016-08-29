@@ -13,6 +13,7 @@ uint32_t max_files;
 uint32_t data_start;
 
 cache_ht cache;
+cache_ht cache2;
 
 void write_inode_field(i_node inode, uint32_t field, uint32_t data){
    uint32_t used_offset  = offsetof(inode_t,used);
@@ -153,7 +154,7 @@ uint8_t read_file(i_node inode, uint32_t offset){
     uint32_t block_off     = offset%block_len;//where I want to write
     uint32_t size          = read_inode_field(inode, 2);
     if(offset>=size){
-        return 0;
+        return 0xFF;
     }
     else {
         uint32_t block_addr = read_inode_field(inode, 3+block);
@@ -287,7 +288,8 @@ int create_dentry(i_node parent, const char* name, int dir, i_node inode){
         dentry.inode = get_free_inode();
     }
     write_inode_field(dentry.inode, 1 ,mode);
-    memcpy(dentry.name,name,12);
+    dentry.name[0]='\0';
+    strcat(dentry.name,name);
     uint8_t* ptr = (uint8_t*)&dentry;
     for(int i=0;i<sizeof(dentry_t);i++){
         uint32_t size = read_inode_field(parent,2);
@@ -368,6 +370,7 @@ uint32_t cache_block(uint32_t block_addr, uint8_t force){
     disk_rd(block_addr, centry->data, block_len);
     centry->block_addr = block_addr;
     centry->active = 1;
+    centry->dirty  = 0;
     if(cache.head == NULL && cache.tail == NULL){
         cache.head = centry;
         cache.tail = centry;
@@ -387,9 +390,10 @@ void empty_cache_block(uint32_t block_addr, int write2disk){
     cache_entry* centry = find_cache_entry(block_addr);
     if(!centry)
         return;
-    if(write2disk)
+    if(write2disk && centry->dirty==1)
         disk_wr(centry->block_addr,centry->data,block_len);
     centry->active = 0;
+    centry->dirty  = 0;
     if(centry == cache.head)
         cache.head = centry->next;
     if(centry == cache.tail)
@@ -429,7 +433,10 @@ void disk_wr_byte(uint32_t addr, uint8_t b){
     uint32_t block_offset = addr%block_len;
     cache_block(block_addr,1);
     cache_entry* centry = find_cache_entry(block_addr);
-    centry->data[block_offset] = b;
+    if(centry->data[block_offset] != b){
+        centry->data[block_offset] = b;
+        centry->dirty = 1;
+    }
 }
 
 uint8_t disk_rd_byte(uint32_t addr){
@@ -501,10 +508,10 @@ void setGlobalEntry(global_table* t, int globalID, i_node inode, file_type type)
     t->entries[globalID].wqread.len   = 0;
 }
 
-int find_globalID_by_inode(global_table* t, i_node inode){
+int find_globalID_by_inode(global_table* t, i_node inode, file_type type){
     int i;
     for(i = 0;i<MAXGLOBAL;i++){
-        if(t->entries[i].active && t->entries[i].inode == inode){
+        if(t->entries[i].active && t->entries[i].inode == inode && t->entries[i].type == type){
             return t->entries[i].globalID;
         }
     }
@@ -578,12 +585,53 @@ int close_global_entry(global_table* t, int globalID){ //close pipe or file firs
     return 0;
 }
 
+void insertSyncPid(pipes_t* pipes, i_node inode, int pid){
+    if(!pipes->p[inode].active)
+        return;
+    pipe_t* pentry = &pipes->p[inode];
+    if(pentry->sync.pid1 == pid)
+        return;
+    if(pentry->sync.pid2 == pid)
+        return;
+    if(pentry->sync.pid1 == 0){
+        pentry->sync.pid1 = pid;
+        return;
+    }
+    if(pentry->sync.pid2 == 0){
+        pentry->sync.pid2 = pid;
+        return;
+    }
+    return;
+}
+
+void clearSyncPid(pipes_t* pipes, i_node inode, int pid){
+    if(!pipes->p[inode].active)
+        return;
+    pipe_t* pentry = &pipes->p[inode];
+    if(pentry->sync.pid1 == pid)
+        pentry->sync.pid1 = 0;
+    if(pentry->sync.pid2 == pid)
+        pentry->sync.pid2 = 0;
+    return;
+}
+
+int getOtherSyncPid(pipes_t* pipes, i_node inode, int pid){
+    if(!pipes->p[inode].active)
+        return 0;
+    pipe_t* pentry = &pipes->p[inode];
+    if(pentry->sync.pid1 == pid)
+        return pentry->sync.pid2;
+    return pentry->sync.pid1;
+}
+
 void reset_pipe(pipes_t* pipes, i_node inode){
     pipes->p[inode].buff[0] = '\0';
     pipes->p[inode].readptr = 0;
     pipes->p[inode].writeptr= 0;
     pipes->p[inode].len = 0;
-
+    pipes->p[inode].sync.pid1 = 0;
+    pipes->p[inode].sync.pid2 = 0;
+    pipes->p[inode].sync.flag = 0;
 }
 
 i_node get_pipe(pipes_t* pipes,i_node inode){
@@ -607,6 +655,7 @@ i_node get_pipe(pipes_t* pipes,i_node inode){
 void setPipe(pipes_t* pipes, i_node inode, int globalID){
     reset_pipe(pipes, inode);
     pipes->p[inode].globalID = globalID;
+    pipes->p[inode].inode = inode;
 }
 
 void send_pipe(pipes_t* pipes, i_node inode, char n){
@@ -653,6 +702,8 @@ void close_pipe(pipes_t* pipes, i_node inode){
         return;
     reset_pipe(pipes, inode);
     pipes->p[inode].active = 0;
+    pipes->p[inode].inode = 0;
+    pipes->p[inode].globalID = 0;
     pipes->count--;
 }
 
@@ -695,16 +746,6 @@ int load_sb(){
 }
 
 void format_disk(){
-    inode_size      = 0;
-    sb_size         = 0;
-    block_num       = 0;
-    block_len       = 0;
-    disk_size       = 0;
-    bl_bitmap_size  = 0;
-    bl_bitmap_start = 0;
-    inode_start     = 0;
-    max_file_size   = 0;
-    data_start      = 0;
     superblock_t sb;
     inode_size   = sizeof(inode_t);
     sb_size      = sizeof(superblock_t);

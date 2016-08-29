@@ -108,14 +108,22 @@ int string2int(char* string){
 //implement parser here
 
 void help(){
-    printF("%s%s%s%s%s%s%s%s%s",
+    printF("%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
             "Shell version 0.1\n",
             "These shell commands are defined internally. Type 'help' to see this list.\n\n",
            " bg [job_num]\t\t\tBrings a program to the background\n",
-           " fg [job_num]\t\t\tBrings a program to the foregorund\n",
+           " fg [job_num]\t\t\tBrings a program to the foreground\n",
            " ps\t\t\t\tPrints the list of running programs and their status\n",
            " nice [job_num] [priority]\tChange the priority of a program\n",
-           " exec [name] [param1 param2...]\tStart a new program\n\n",
+           " exec [name] [param1 param2...]\tStart a new program\n",
+           " shutdown \t\t\tPrepare OS for shutdown\n\n",
+           " cd [path]\t\t\tChange current directory\n",
+           " ls \t\t\t\tList all files in the current directory\n",
+           " pwd \t\t\t\tPrint current directory path\n",
+           " rm [name]\t\t\tRemove a file\n",
+           " touch [name]\t\t\tCreate a file\n",
+           " mkdir [name]\t\t\tCreate a new folder\n",
+           " rmdir [name]\t\t\tRemove a folder\n\n",
            " Press the '>' key to terminate the current process\n",
            " Press the '<' key to pause the current process\n");
 }
@@ -175,7 +183,7 @@ void shell() {
     char line[50];
     char* argbuff[50];
 
-    char *cmd_list[15];
+    char *cmd_list[20];
     cmd_list[0]  = "bg";
     cmd_list[1]  = "cd";
     cmd_list[2]  = "exec";
@@ -187,6 +195,9 @@ void shell() {
     cmd_list[8]  = "ps";
     cmd_list[9]  = "pwd";
     cmd_list[10] = "rmdir";
+    cmd_list[11] = "rm";
+    cmd_list[12] = "shutdown";
+    cmd_list[13] = "touch";
 
     printF("\n  ___   _  _   ___   _      _    \n");
     printF(" / __| | || | | __| | |    | |   \n");
@@ -338,6 +349,27 @@ void shell() {
             case 'r':
                 if(strcmp(cmd,cmd_list[10]) == 0){
                     int res = rmdir(argbuff[1]);
+                    if(res != 0){
+                        printF("An error occurred!\n");
+                    }
+                    break;
+                }
+                else if(strcmp(cmd, cmd_list[11]) == 0){
+                    int res = unlink(argbuff[1]);
+                    if(res != 0){
+                        printF("An error occurred!\n");
+                    }
+                    break;
+                }
+            case 's':
+                if(strcmp(cmd,cmd_list[12]) == 0){
+                    clear_cache();
+                    printF("You can shutdown your computer now!\n");
+                    break;
+                }
+            case 't':
+                if(strcmp(cmd,cmd_list[13]) == 0){
+                    int res = creat(argbuff[1]);
                     if(res != 0){
                         printF("An error occurred!\n");
                     }
