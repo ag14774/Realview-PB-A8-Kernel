@@ -1,14 +1,5 @@
 #include "kernel.h"
 
-/* Since we *know* there will be 2 processes, stemming from the 2 user 
- * programs, we can 
- * 
- * - allocate a fixed-size process table (of PCBs), and use a pointer
- *   to keep track of which entry is currently executing, and
- * - employ a fixed-case of round-robin scheduling: no more processes
- *   can be created, and neither is able to complete.
- */
-
 #define PRINTPIDS 0
 
 extern pcb_t *current;
